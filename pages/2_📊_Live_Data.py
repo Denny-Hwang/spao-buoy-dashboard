@@ -11,7 +11,10 @@ st.title("📊 Live Data")
 
 _errors = []
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data, update_note, reorder_columns
+    from utils.sheets_client import (
+        list_device_tabs, get_device_data, update_note, reorder_columns,
+        get_device_ids, get_device_column,
+    )
 except Exception as e:
     _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
@@ -25,7 +28,6 @@ def render_live_data():
             st.error(err)
         return
 
-    # Refresh button
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -35,13 +37,38 @@ def render_live_data():
         st.info("No device tabs found.")
         return
 
+    # Load all tab data to discover Device IDs
+    frames = []
+    tab_map = {}  # device_id -> tab_name (for note saving)
+    for tab in tabs:
+        df = get_device_data(tab)
+        if not df.empty:
+            df = df.copy()
+            df["Device Tab"] = tab
+            frames.append(df)
+
+    if not frames:
+        st.info("No data available.")
+        return
+
+    all_data = pd.concat(frames, ignore_index=True)
+    dev_col = get_device_column(all_data) or "Device Tab"
+    device_ids = get_device_ids(all_data)
+    if not device_ids:
+        device_ids = tabs
+        dev_col = "Device Tab"
+
     # Device selector
-    selected = st.selectbox("Select Device", tabs)
+    selected = st.selectbox("Select Device", device_ids)
+
+    # Filter by selected device
+    df = all_data[all_data[dev_col] == selected].copy()
+    # Track which tab this device belongs to (for note saving)
+    selected_tab = df["Device Tab"].iloc[0] if "Device Tab" in df.columns and not df.empty else selected
 
     # Auto-refresh
     auto_refresh = st.checkbox("Auto-refresh (every 5 min)")
     if auto_refresh:
-        st.empty()
         import time
         if "last_refresh" not in st.session_state:
             st.session_state.last_refresh = time.time()
@@ -50,8 +77,6 @@ def render_live_data():
             get_device_data.clear()
             st.rerun()
 
-    # Load data
-    df = get_device_data(selected)
     if df.empty:
         st.info(f"No data for {selected}.")
         return
@@ -80,10 +105,10 @@ def render_live_data():
     if time_cols:
         df = df.sort_index(ascending=False)
 
-    # Ensure columns are reordered (hex last)
+    # Reorder columns (hex last)
     df = reorder_columns(df)
 
-    # Ensure Notes column exists for inline editing
+    # Ensure Notes column exists
     if "Notes" not in df.columns:
         df["Notes"] = ""
 
@@ -109,7 +134,7 @@ def render_live_data():
                 for idx in df.index[changed_mask]:
                     pos = df.index.get_loc(idx)
                     new_note = str(edited_notes.iloc[pos])
-                    if update_note(selected, idx, new_note):
+                    if update_note(selected_tab, idx, new_note):
                         saved += 1
                 if saved:
                     st.success(f"Saved {saved} note(s)!")

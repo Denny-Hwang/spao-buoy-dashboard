@@ -197,6 +197,31 @@ def get_all_data(sheet_id: str = SHEET_ID) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def get_device_ids(df: pd.DataFrame) -> list[str]:
+    """Extract unique device identifiers from a DataFrame.
+
+    Checks the 'Device' column first (RockBLOCK format), then 'IMEI',
+    then 'Device Tab'.  Returns a sorted list of unique IDs.
+    """
+    for col in ("Device", "IMEI", "Device Tab"):
+        if col in df.columns:
+            ids = df[col].dropna().astype(str).unique().tolist()
+            ids = [d for d in ids if d and d != ""]
+            if ids:
+                return sorted(ids)
+    return []
+
+
+def get_device_column(df: pd.DataFrame) -> str | None:
+    """Return the name of the best device-identifier column in *df*."""
+    for col in ("Device", "IMEI", "Device Tab"):
+        if col in df.columns:
+            vals = df[col].dropna().astype(str)
+            if not vals.empty and vals.str.strip().ne("").any():
+                return col
+    return None
+
+
 def update_note(tab_name: str, row_index: int, note_text: str, sheet_id: str = SHEET_ID) -> bool:
     """Write a note to the Notes column for a specific row."""
     try:
