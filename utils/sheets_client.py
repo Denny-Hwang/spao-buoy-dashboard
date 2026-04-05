@@ -17,6 +17,9 @@ SCOPES = [
 ]
 EXCLUDED_TABS = {"_errors", "Sheet1"}
 
+# Columns containing long hex strings — always placed at the end of tables
+_HEX_COLUMNS = {"Raw Hex", "Previous Session", "Payload", "data", "hex", "Hex"}
+
 
 @st.cache_resource
 def get_client() -> gspread.Client:
@@ -32,6 +35,15 @@ def _open_sheet(sheet_id: str = SHEET_ID) -> gspread.Spreadsheet:
     return client.open_by_key(sheet_id)
 
 
+def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Move hex/long data columns to the end for better readability."""
+    if df.empty:
+        return df
+    hex_cols = [c for c in df.columns if c in _HEX_COLUMNS]
+    other_cols = [c for c in df.columns if c not in _HEX_COLUMNS]
+    return df[other_cols + hex_cols]
+
+
 def detect_sheet_format(headers: list[str]) -> str:
     """Detect if sheet contains raw RockBLOCK data or decoded webhook data."""
     if not headers:
@@ -42,7 +54,6 @@ def detect_sheet_format(headers: list[str]) -> str:
     elif first in ("Receive Time",):
         return "webhook_decoded"
     else:
-        # Check for payload/hex columns as fallback
         lower_headers = [h.lower().strip() for h in headers]
         if "payload" in lower_headers or "hex" in lower_headers or "data" in lower_headers:
             return "rockblock_raw"
@@ -70,31 +81,50 @@ def decode_rockblock_data(records: list[dict]) -> pd.DataFrame:
 
         result = auto_detect_and_decode(hex_payload)
 
-        # Determine timestamp from available columns
+        # Determine timestamp — try multiple column names
         timestamp = row.get("Date Time (UTC)", row.get("Date Time", ""))
 
         # Determine device identifier
         device = str(row.get("Device", ""))
 
+        # Build decoded row with sensor data first, hex last
         decoded_row = {
             "Timestamp": timestamp,
             "Device": device,
-            "Raw Hex": hex_payload,
             "Packet Ver": result.get("version", "Unknown") if result else "Unknown",
             "Bytes": row.get("Length (Bytes)", len(hex_payload) // 2),
             "CRC Valid": result.get("crc_ok", False) if result else False,
         }
 
+        # Add decoded sensor fields with units in column names
         if result and result.get("fields"):
             for field in result["fields"]:
-                decoded_row[field["name"]] = field["value"]
+                unit = field.get("unit", "")
+                name = field["name"]
+                if unit and unit != "hex":
+                    col_name = f"{name} ({unit})"
+                else:
+                    col_name = name
+                decoded_row[col_name] = field["value"]
 
         if "error" in result and result["error"]:
             decoded_row["Decode Error"] = result["error"]
 
+        # Raw hex at the end
+        decoded_row["Raw Hex"] = hex_payload
+
         decoded_rows.append(decoded_row)
 
-    return pd.DataFrame(decoded_rows) if decoded_rows else pd.DataFrame()
+    if not decoded_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(decoded_rows)
+
+    # Parse timestamp column
+    if "Timestamp" in df.columns:
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", format="mixed")
+
+    return reorder_columns(df)
 
 
 def read_and_decode_sheet(worksheet) -> pd.DataFrame:
@@ -113,18 +143,16 @@ def read_and_decode_sheet(worksheet) -> pd.DataFrame:
         for col in df.columns:
             if col != "Notes":
                 df[col] = pd.to_numeric(df[col], errors="ignore")
-        return df
+        return reorder_columns(df)
     else:
-        # Unknown format — try to find a hex/payload column and decode
         hex_col = _find_hex_column(headers)
         if hex_col:
             return decode_rockblock_data(records)
-        # Fall back to raw DataFrame
         df = pd.DataFrame(records)
         for col in df.columns:
             if col != "Notes":
                 df[col] = pd.to_numeric(df[col], errors="ignore")
-        return df
+        return reorder_columns(df)
 
 
 @st.cache_data(ttl=60)
@@ -162,9 +190,6 @@ def get_all_data(sheet_id: str = SHEET_ID) -> pd.DataFrame:
         df = get_device_data(tab, sheet_id)
         if not df.empty:
             df = df.copy()
-            # Use IMEI column if present, otherwise use tab name
-            if "IMEI" not in df.columns:
-                df["IMEI"] = tab
             df["Device Tab"] = tab
             frames.append(df)
     if not frames:
@@ -173,17 +198,7 @@ def get_all_data(sheet_id: str = SHEET_ID) -> pd.DataFrame:
 
 
 def update_note(tab_name: str, row_index: int, note_text: str, sheet_id: str = SHEET_ID) -> bool:
-    """
-    Write a note to the Notes column for a specific row.
-
-    Args:
-        tab_name: Device tab name.
-        row_index: 0-based index into data rows (row 0 = spreadsheet row 2).
-        note_text: Text to write.
-
-    Returns:
-        True on success.
-    """
+    """Write a note to the Notes column for a specific row."""
     try:
         spreadsheet = _open_sheet(sheet_id)
         worksheet = spreadsheet.worksheet(tab_name)

@@ -17,8 +17,7 @@ st.sidebar.markdown("Self-Powered Arctic Ocean buoy monitoring system")
 st.sidebar.divider()
 st.sidebar.markdown(
     "<small>SPAO Buoy Dashboard<br>"
-    "Pacific Northwest National Laboratory<br>"
-    "DOE Water Power Technologies Office</small>",
+    "Pacific Northwest National Laboratory</small>",
     unsafe_allow_html=True,
 )
 

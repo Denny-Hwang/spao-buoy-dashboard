@@ -157,4 +157,4 @@ with st.expander("Sample Hex Strings"):
         st.code(f"{ver}: {hex_str}")
 
 st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory · DOE Water Power Technologies Office")
+st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")
