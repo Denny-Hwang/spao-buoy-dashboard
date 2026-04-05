@@ -14,13 +14,15 @@ try:
     from streamlit_folium import st_folium
 
     SHEETS_AVAILABLE = True
-except Exception:
+except Exception as _import_err:
     SHEETS_AVAILABLE = False
+    _IMPORT_ERROR = _import_err
 
 
 def render_dashboard():
     if not SHEETS_AVAILABLE:
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
+        st.error(f"Import error: {_IMPORT_ERROR}")
         return
 
     # Refresh button

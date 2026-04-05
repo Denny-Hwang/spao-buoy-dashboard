@@ -20,8 +20,9 @@ try:
     import plotly.graph_objects as go
 
     SHEETS_AVAILABLE = True
-except Exception:
+except Exception as _import_err:
     SHEETS_AVAILABLE = False
+    _IMPORT_ERROR = _import_err
 
 
 def _find_time_col(df: pd.DataFrame) -> str | None:
@@ -37,6 +38,7 @@ def _find_time_col(df: pd.DataFrame) -> str | None:
 def render_visualization():
     if not SHEETS_AVAILABLE:
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
+        st.error(f"Import error: {_IMPORT_ERROR}")
         return
 
     # Refresh button
