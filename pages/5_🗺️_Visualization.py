@@ -1,5 +1,5 @@
 """
-Page 5: Visualization — Maps and sensor plots.
+Page 5: Visualization — Drift maps and sensor plots with per-device filtering.
 """
 
 import streamlit as st
@@ -24,6 +24,16 @@ except Exception:
     SHEETS_AVAILABLE = False
 
 
+def _find_time_col(df: pd.DataFrame) -> str | None:
+    """Find and parse the best time column in the DataFrame."""
+    candidates = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
+    if not candidates:
+        return None
+    time_col = candidates[0]
+    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    return time_col
+
+
 def render_visualization():
     if not SHEETS_AVAILABLE:
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
@@ -39,7 +49,7 @@ def render_visualization():
         st.info("No device tabs found.")
         return
 
-    # Sidebar controls
+    # Sidebar: device selection
     st.sidebar.subheader("Data Source")
     selected_devices = st.sidebar.multiselect("Devices", tabs, default=tabs)
 
@@ -53,8 +63,7 @@ def render_visualization():
         df = get_device_data(tab_name)
         if not df.empty:
             df = df.copy()
-            if "IMEI" not in df.columns:
-                df["IMEI"] = tab_name
+            df["Device"] = tab_name
             frames.append(df)
 
     if not frames:
@@ -63,23 +72,20 @@ def render_visualization():
 
     all_df = pd.concat(frames, ignore_index=True)
 
-    # Date range filter
-    time_cols = [c for c in all_df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
-    if time_cols:
-        time_col = time_cols[0]
-        try:
-            all_df[time_col] = pd.to_datetime(all_df[time_col], errors="coerce")
-            valid = all_df[time_col].dropna()
-            if not valid.empty:
-                c1, c2 = st.sidebar.columns(2)
-                with c1:
-                    start = st.date_input("Start", value=valid.min().date(), key="viz_start")
-                with c2:
-                    end = st.date_input("End", value=valid.max().date(), key="viz_end")
-                mask = (all_df[time_col].dt.date >= start) & (all_df[time_col].dt.date <= end)
-                all_df = all_df[mask]
-        except Exception:
-            pass
+    # Parse time column
+    time_col = _find_time_col(all_df)
+
+    # Sidebar: date range filter
+    if time_col:
+        valid = all_df[time_col].dropna()
+        if not valid.empty:
+            c1, c2 = st.sidebar.columns(2)
+            with c1:
+                start = st.date_input("Start", value=valid.min().date(), key="viz_start")
+            with c2:
+                end = st.date_input("End", value=valid.max().date(), key="viz_end")
+            mask = all_df[time_col].dt.date.between(start, end) | all_df[time_col].isna()
+            all_df = all_df[mask]
 
     if all_df.empty:
         st.info("No data in selected date range.")
@@ -90,7 +96,7 @@ def render_visualization():
 
     # --- Drift Map ---
     with tab_map:
-        basemap = st.selectbox("Basemap", list(BASEMAPS.keys()))
+        basemap = st.selectbox("Basemap", list(BASEMAPS.keys()), index=0)  # Satellite first
 
         lat_cols = [c for c in all_df.columns if "latitude" in c.lower()]
         lon_cols = [c for c in all_df.columns if "longitude" in c.lower()]
@@ -101,6 +107,8 @@ def render_visualization():
                 basemap=basemap,
                 lat_col=lat_cols[0],
                 lon_col=lon_cols[0],
+                device_col="Device",
+                highlight_latest=True,
             )
             st_folium(m, width=None, height=600, returned_objects=[])
         else:
@@ -108,10 +116,11 @@ def render_visualization():
 
     # --- Sensor Plots ---
     with tab_sensor:
-        if not time_cols:
+        if not time_col:
             st.warning("No time column found for time-series plots.")
         else:
-            x_col = time_cols[0]
+            # Drop rows where time is NaT for clean plotting
+            plot_base = all_df.dropna(subset=[time_col])
 
             # Standard sensor plots
             sensor_configs = [
@@ -124,45 +133,49 @@ def render_visualization():
             ]
 
             for title, unit, keywords in sensor_configs:
-                matching = [c for c in all_df.columns
+                matching = [c for c in plot_base.columns
                             if any(kw in c.lower() for kw in keywords)
-                            and c != "IMEI"]
+                            and c not in ("Device", "Device Tab", "IMEI")]
                 if matching:
                     y_col = matching[0]
-                    all_df[y_col] = pd.to_numeric(all_df[y_col], errors="coerce")
+                    plot_df = plot_base.copy()
+                    plot_df[y_col] = pd.to_numeric(plot_df[y_col], errors="coerce")
+                    plot_df = plot_df.dropna(subset=[y_col])
+                    if plot_df.empty:
+                        continue
                     fig = make_time_series(
-                        all_df.dropna(subset=[y_col]),
-                        x_col=x_col,
+                        plot_df,
+                        x_col=time_col,
                         y_col=y_col,
                         title=title,
                         y_unit=unit,
-                        color_col="IMEI",
+                        color_col="Device",
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
             # Correlation: Pressure vs SST
-            pres_cols = [c for c in all_df.columns if "pressure" in c.lower()]
-            sst_cols = [c for c in all_df.columns if "sst" in c.lower() or "ocean temp" in c.lower()]
+            pres_cols = [c for c in plot_base.columns if "pressure" in c.lower()]
+            sst_cols = [c for c in plot_base.columns if "sst" in c.lower() or "ocean temp" in c.lower()]
             if pres_cols and sst_cols:
                 st.subheader("Pressure vs SST")
                 fig = make_scatter(
-                    all_df,
+                    plot_base,
                     x_col=sst_cols[0],
                     y_col=pres_cols[0],
                     title="Pressure vs SST",
                     x_unit="°C",
                     y_unit="psi",
-                    color_col="IMEI",
+                    color_col="Device",
                     trendline=True,
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
             # Humidity + Dewpoint (Magnus formula)
-            hum_cols = [c for c in all_df.columns if "humidity" in c.lower()]
-            temp_cols = [c for c in all_df.columns if "internal temp" in c.lower()]
-            if hum_cols and temp_cols and time_cols:
+            hum_cols = [c for c in plot_base.columns if "humidity" in c.lower()]
+            temp_cols = [c for c in plot_base.columns if "internal temp" in c.lower()]
+            if hum_cols and temp_cols:
                 st.subheader("Humidity & Dewpoint")
-                plot_df = all_df.copy()
+                plot_df = plot_base.copy()
                 plot_df[hum_cols[0]] = pd.to_numeric(plot_df[hum_cols[0]], errors="coerce")
                 plot_df[temp_cols[0]] = pd.to_numeric(plot_df[temp_cols[0]], errors="coerce")
                 plot_df = plot_df.dropna(subset=[hum_cols[0], temp_cols[0]])
@@ -170,27 +183,26 @@ def render_visualization():
                 if not plot_df.empty:
                     a, b = 17.27, 237.7
                     T = plot_df[temp_cols[0]]
-                    RH = plot_df[hum_cols[0]]
-                    RH_clamped = RH.clip(lower=0.1)
-                    alpha = (a * T) / (b + T) + np.log(RH_clamped / 100)
+                    RH = plot_df[hum_cols[0]].clip(lower=0.1)
+                    alpha = (a * T) / (b + T) + np.log(RH / 100)
                     plot_df["Dewpoint"] = (b * alpha) / (a - alpha)
 
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(
-                        x=plot_df[x_col], y=plot_df[hum_cols[0]],
+                        x=plot_df[time_col], y=plot_df[hum_cols[0]],
                         mode="lines+markers", name="Humidity (%RH)",
                         line=dict(width=LINE_WIDTH, color=COLORS[0]),
                         marker=dict(size=MARKER_SIZE),
                         yaxis="y",
                     ))
                     fig.add_trace(go.Scatter(
-                        x=plot_df[x_col], y=plot_df["Dewpoint"],
+                        x=plot_df[time_col], y=plot_df["Dewpoint"],
                         mode="lines+markers", name="Dewpoint (°C)",
                         line=dict(width=LINE_WIDTH, color=COLORS[1]),
                         marker=dict(size=MARKER_SIZE),
                         yaxis="y2",
                     ))
-                    apply_plot_style(fig, title="Humidity & Dewpoint", x_title=x_col, y_title="Humidity (%RH)")
+                    apply_plot_style(fig, title="Humidity & Dewpoint", x_title=time_col, y_title="Humidity (%RH)")
                     fig.update_layout(
                         yaxis2=dict(
                             title="Dewpoint (°C)",
@@ -222,7 +234,7 @@ def render_visualization():
             with c4:
                 plot_type = st.selectbox("Plot Type", ["Line", "Scatter", "X-Y with Trendline", "3D Scatter"])
             with c5:
-                color_var = st.selectbox("Color By", ["None", "IMEI"] + numeric_cols, key="custom_color")
+                color_var = st.selectbox("Color By", ["None", "Device"] + numeric_cols, key="custom_color")
 
             color_col = color_var if color_var != "None" else None
 
@@ -232,15 +244,12 @@ def render_visualization():
                 if plot_type == "Line":
                     fig = make_time_series(plot_df, x_var, y_var, color_col=color_col)
                     st.plotly_chart(fig, use_container_width=True)
-
                 elif plot_type == "Scatter":
                     fig = make_scatter(plot_df, x_var, y_var, color_col=color_col)
                     st.plotly_chart(fig, use_container_width=True)
-
                 elif plot_type == "X-Y with Trendline":
                     fig = make_scatter(plot_df, x_var, y_var, color_col=color_col, trendline=True)
                     st.plotly_chart(fig, use_container_width=True)
-
                 elif plot_type == "3D Scatter":
                     if z_var == "None":
                         st.warning("Select a Z-axis variable for 3D scatter.")
@@ -253,4 +262,4 @@ def render_visualization():
 render_visualization()
 
 st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory · DOE Water Power Technologies Office")
+st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")

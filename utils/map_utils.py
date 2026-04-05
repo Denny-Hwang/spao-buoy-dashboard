@@ -5,7 +5,6 @@ Folium map builder for SPAO buoy drift trajectory visualization.
 import folium
 import numpy as np
 import pandas as pd
-from folium.plugins import MarkerCluster
 
 from utils.plot_utils import COLORS
 
@@ -33,61 +32,57 @@ BASEMAPS = {
 }
 
 
-def interpolate_gps_zeros(df: pd.DataFrame, lat_col: str = "GPS Latitude", lon_col: str = "GPS Longitude") -> pd.DataFrame:
-    """
-    Interpolate GPS (0,0) points from neighboring valid fixes.
-    Adds an 'interpolated' boolean column.
-    """
+def interpolate_gps_zeros(df: pd.DataFrame, lat_col: str, lon_col: str) -> pd.DataFrame:
+    """Interpolate GPS (0,0) points from neighboring valid fixes."""
     df = df.copy()
     df["interpolated"] = False
 
-    # Mark zero GPS as NaN for interpolation
     zero_mask = (df[lat_col] == 0) & (df[lon_col] == 0)
     df.loc[zero_mask, lat_col] = np.nan
     df.loc[zero_mask, lon_col] = np.nan
     df.loc[zero_mask, "interpolated"] = True
 
-    # Interpolate linearly
     df[lat_col] = df[lat_col].interpolate(method="linear", limit_direction="both")
     df[lon_col] = df[lon_col].interpolate(method="linear", limit_direction="both")
 
     return df
 
 
-def _popup_html(row: pd.Series) -> str:
-    """Generate HTML popup content for a map marker."""
+def _popup_html(row: pd.Series, device_name: str = "") -> str:
+    """Generate HTML popup content for a map marker with sensor details."""
     lines = []
+    if device_name:
+        lines.append(f"<b style='font-size:14px'>{device_name}</b><hr style='margin:4px 0'>")
     for col, val in row.items():
-        if col == "interpolated":
+        if col in ("interpolated", "Device Tab", "IMEI", "_parsed_time"):
             continue
-        lines.append(f"<b>{col}:</b> {val}")
+        if pd.isna(val):
+            continue
+        # Format numeric values
+        if isinstance(val, float):
+            lines.append(f"<b>{col}:</b> {val:.4f}")
+        else:
+            lines.append(f"<b>{col}:</b> {val}")
     return "<br>".join(lines)
 
 
 def build_drift_map(
     df: pd.DataFrame,
-    basemap: str = "Street",
+    basemap: str = "Satellite",
     lat_col: str = "GPS Latitude",
     lon_col: str = "GPS Longitude",
-    device_col: str = "IMEI",
+    device_col: str = "Device Tab",
     max_points: int = 1000,
+    highlight_latest: bool = False,
 ) -> folium.Map:
-    """
-    Build a Folium drift trajectory map.
-
-    Args:
-        df: DataFrame with GPS and sensor data.
-        basemap: One of "Satellite", "Terrain", "Dark", "Street".
-        lat_col: Column name for latitude.
-        lon_col: Column name for longitude.
-        device_col: Column name for device ID.
-        max_points: Subsample if total points exceed this.
-
-    Returns:
-        Folium Map object.
-    """
+    """Build a Folium drift trajectory map with per-device colors and clickable markers."""
     if df.empty:
         return folium.Map(location=[0, 0], zoom_start=2)
+
+    # Ensure numeric GPS
+    df = df.copy()
+    df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
+    df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
 
     # Subsample if too many points
     if len(df) > max_points:
@@ -95,8 +90,6 @@ def build_drift_map(
 
     # Interpolate GPS zeros
     df = interpolate_gps_zeros(df, lat_col, lon_col)
-
-    # Drop rows where GPS is still NaN after interpolation
     df = df.dropna(subset=[lat_col, lon_col])
     if df.empty:
         return folium.Map(location=[0, 0], zoom_start=2)
@@ -105,23 +98,22 @@ def build_drift_map(
     center_lat = df[lat_col].mean()
     center_lon = df[lon_col].mean()
 
-    bm = BASEMAPS.get(basemap, BASEMAPS["Street"])
+    bm = BASEMAPS.get(basemap, BASEMAPS["Satellite"])
     if bm["tiles"] in ("OpenStreetMap", "cartodbdark_matter"):
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=4, tiles=bm["tiles"])
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles=bm["tiles"])
     else:
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=4)
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
         folium.TileLayer(
             tiles=bm["tiles"],
             attr=bm["attr"],
             name=bm["name"],
         ).add_to(m)
 
-    # Add device tracks
+    # Device grouping
     if device_col in df.columns:
         devices = df[device_col].unique()
     else:
         devices = ["All"]
-        df = df.copy()
         df[device_col] = "All"
 
     for i, device in enumerate(devices):
@@ -142,25 +134,34 @@ def build_drift_map(
                 popup=str(device),
             ).add_to(m)
 
-        # Add markers
-        for _, row in device_df.iterrows():
+        # Add markers with popups
+        for idx, (_, row) in enumerate(device_df.iterrows()):
             is_interp = row.get("interpolated", False)
-            icon_color = "gray" if is_interp else "blue"
-            icon = "question-sign" if is_interp else "record"
-            prefix = "glyphicon"
+            is_latest = highlight_latest and (idx == len(device_df) - 1)
 
-            folium.CircleMarker(
-                location=[row[lat_col], row[lon_col]],
-                radius=5 if not is_interp else 4,
-                color=color,
-                fill=not is_interp,
-                fill_color=color if not is_interp else "white",
-                fill_opacity=0.8 if not is_interp else 0.3,
-                popup=folium.Popup(_popup_html(row), max_width=300),
-                tooltip=f"{device} {'(interpolated)' if is_interp else ''}",
-            ).add_to(m)
+            popup_html = _popup_html(row, device_name=str(device))
 
-    # Add layer control if multiple basemaps
+            if is_latest:
+                # Latest point — large highlighted marker with star
+                folium.Marker(
+                    location=[row[lat_col], row[lon_col]],
+                    popup=folium.Popup(popup_html, max_width=350),
+                    tooltip=f"{device} (Latest)",
+                    icon=folium.Icon(color="red", icon="star", prefix="fa"),
+                ).add_to(m)
+            else:
+                # Regular trajectory point
+                folium.CircleMarker(
+                    location=[row[lat_col], row[lon_col]],
+                    radius=5 if not is_interp else 3,
+                    color=color,
+                    fill=not is_interp,
+                    fill_color=color if not is_interp else "white",
+                    fill_opacity=0.8 if not is_interp else 0.3,
+                    popup=folium.Popup(popup_html, max_width=350),
+                    tooltip=f"{device}{' (interpolated)' if is_interp else ''}",
+                ).add_to(m)
+
     folium.LayerControl().add_to(m)
 
     # Auto-zoom to fit all tracks
@@ -182,14 +183,24 @@ def build_mini_map(
     if df.empty:
         return folium.Map(location=[0, 0], zoom_start=2, width="100%", height="300px")
 
+    # Use satellite basemap
+    bm = BASEMAPS["Satellite"]
     m = folium.Map(location=[0, 0], zoom_start=2, width="100%", height="300px")
+    folium.TileLayer(tiles=bm["tiles"], attr=bm["attr"], name=bm["name"]).add_to(m)
 
-    if device_col in df.columns:
-        devices = df[device_col].unique()
-    else:
-        devices = ["All"]
-        df = df.copy()
-        df[device_col] = "All"
+    df = df.copy()
+    df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
+    df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
+
+    if device_col not in df.columns:
+        device_col_actual = "Device Tab" if "Device Tab" in df.columns else None
+        if device_col_actual:
+            device_col = device_col_actual
+        else:
+            devices = ["All"]
+            df[device_col] = "All"
+
+    devices = df[device_col].unique()
 
     lats, lons = [], []
     for i, device in enumerate(devices):
@@ -197,8 +208,8 @@ def build_mini_map(
         if device_df.empty:
             continue
 
-        # Get latest row with valid GPS
-        valid = device_df[(device_df[lat_col] != 0) | (device_df[lon_col] != 0)]
+        valid = device_df[device_df[lat_col].notna() & device_df[lon_col].notna()]
+        valid = valid[(valid[lat_col] != 0) | (valid[lon_col] != 0)]
         if valid.empty:
             continue
 
@@ -207,11 +218,10 @@ def build_mini_map(
         lats.append(lat)
         lons.append(lon)
 
-        color = COLORS[i % len(COLORS)]
         folium.Marker(
             location=[lat, lon],
             popup=f"{device}",
-            icon=folium.Icon(color="blue", icon="info-sign"),
+            icon=folium.Icon(color="red", icon="star", prefix="fa"),
         ).add_to(m)
 
     if lats and lons:

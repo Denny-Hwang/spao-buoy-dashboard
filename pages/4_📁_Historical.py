@@ -10,7 +10,7 @@ st.set_page_config(page_title="Historical Data", page_icon="📁", layout="wide"
 st.title("📁 Historical Data")
 
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data, SHEET_ID
+    from utils.sheets_client import list_device_tabs, get_device_data, get_all_data, reorder_columns
     SHEETS_AVAILABLE = True
 except Exception:
     SHEETS_AVAILABLE = False
@@ -26,29 +26,31 @@ def render_historical():
         st.cache_data.clear()
         st.rerun()
 
-    # Source selector
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        sheet_id = st.text_input("Google Sheet ID", value=SHEET_ID)
-    with col2:
-        st.write("")
-        st.write("")
-        if st.button("Load Sheet"):
-            st.session_state["hist_sheet_id"] = sheet_id
-
-    active_sheet = st.session_state.get("hist_sheet_id", sheet_id)
-
-    tabs = list_device_tabs(active_sheet)
+    tabs = list_device_tabs()
     if not tabs:
-        st.info("No device tabs found in the specified sheet.")
+        st.info("No device tabs found.")
         return
 
-    selected = st.selectbox("Select Device", tabs)
-
-    df = get_device_data(selected, active_sheet)
-    if df.empty:
-        st.info(f"No data for {selected}.")
+    # Device selector — multi-select for filtering
+    selected_devices = st.multiselect("Select Devices", tabs, default=tabs)
+    if not selected_devices:
+        st.info("Select at least one device.")
         return
+
+    # Load and merge data
+    frames = []
+    for tab in selected_devices:
+        df = get_device_data(tab)
+        if not df.empty:
+            df = df.copy()
+            df["Device Tab"] = tab
+            frames.append(df)
+
+    if not frames:
+        st.info("No data available for selected devices.")
+        return
+
+    df = pd.concat(frames, ignore_index=True)
 
     # Date range filter
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
@@ -67,6 +69,9 @@ def render_historical():
                 df = df[mask]
         except Exception:
             pass
+
+    # Reorder columns (hex last)
+    df = reorder_columns(df)
 
     # Summary stats
     st.subheader("Summary")
@@ -88,7 +93,7 @@ def render_historical():
 
     # Data table
     st.subheader("Data")
-    st.dataframe(df, use_container_width=True, height=500)
+    st.dataframe(df, use_container_width=True, height=500, hide_index=True)
 
     # CSV export
     csv_buf = BytesIO()
@@ -96,7 +101,7 @@ def render_historical():
     st.download_button(
         "Export CSV",
         data=csv_buf.getvalue(),
-        file_name=f"{selected}_historical.csv",
+        file_name="historical_data.csv",
         mime="text/csv",
     )
 
@@ -104,4 +109,4 @@ def render_historical():
 render_historical()
 
 st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory · DOE Water Power Technologies Office")
+st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")

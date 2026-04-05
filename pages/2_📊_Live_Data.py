@@ -1,5 +1,5 @@
 """
-Page 2: Live Data — Real-time data table with notes editing.
+Page 2: Live Data — Real-time data table with inline notes editing.
 """
 
 import streamlit as st
@@ -10,7 +10,7 @@ st.set_page_config(page_title="Live Data", page_icon="📊", layout="wide")
 st.title("📊 Live Data")
 
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data, update_note
+    from utils.sheets_client import list_device_tabs, get_device_data, update_note, reorder_columns
     SHEETS_AVAILABLE = True
 except Exception:
     SHEETS_AVAILABLE = False
@@ -76,8 +76,40 @@ def render_live_data():
     if time_cols:
         df = df.sort_index(ascending=False)
 
-    # Display data table
-    st.dataframe(df, use_container_width=True, height=400)
+    # Ensure columns are reordered (hex last)
+    df = reorder_columns(df)
+
+    # Ensure Notes column exists for inline editing
+    if "Notes" not in df.columns:
+        df["Notes"] = ""
+
+    # Inline editable data table
+    st.subheader("Data")
+    edited_df = st.data_editor(
+        df,
+        use_container_width=True,
+        height=500,
+        disabled=[c for c in df.columns if c != "Notes"],
+        hide_index=True,
+        key=f"editor_{selected}",
+    )
+
+    # Detect and save note changes
+    if edited_df is not None and "Notes" in edited_df.columns:
+        original_notes = df["Notes"].fillna("").astype(str)
+        edited_notes = edited_df["Notes"].fillna("").astype(str)
+        changed_mask = original_notes.values != edited_notes.values
+        if changed_mask.any():
+            if st.button("💾 Save Notes", type="primary"):
+                saved = 0
+                for idx in df.index[changed_mask]:
+                    pos = df.index.get_loc(idx)
+                    new_note = str(edited_notes.iloc[pos])
+                    if update_note(selected, idx, new_note):
+                        saved += 1
+                if saved:
+                    st.success(f"Saved {saved} note(s)!")
+                    st.rerun()
 
     # CSV download
     csv_buf = BytesIO()
@@ -89,33 +121,8 @@ def render_live_data():
         mime="text/csv",
     )
 
-    # Notes editor
-    st.subheader("Edit Notes")
-    if "Notes" not in df.columns:
-        df["Notes"] = ""
-
-    row_options = list(range(len(df)))
-    if not row_options:
-        return
-
-    selected_row = st.selectbox(
-        "Select row to edit",
-        row_options,
-        format_func=lambda i: f"Row {i + 1}" + (f" — {df.iloc[i].get(time_cols[0], '')}" if time_cols else ""),
-    )
-
-    current_note = str(df.iloc[selected_row].get("Notes", ""))
-    new_note = st.text_area("Note", value=current_note, key=f"note_{selected_row}")
-
-    if st.button("Save Note"):
-        original_idx = df.index[selected_row]
-        success = update_note(selected, original_idx, new_note)
-        if success:
-            st.success("Note saved!")
-            st.rerun()
-
 
 render_live_data()
 
 st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory · DOE Water Power Technologies Office")
+st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")
