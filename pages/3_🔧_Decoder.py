@@ -1,5 +1,6 @@
 """
 Page 3: Decoder Tool — Standalone packet decoder for SPAO telemetry.
+Supports manual hex input, CSV batch decode, and RockBLOCK export format.
 """
 
 import streamlit as st
@@ -66,7 +67,6 @@ with tab_single:
                     hex_clean = hex_input.strip().replace(" ", "").replace("0x", "")
                     try:
                         raw_bytes = bytes.fromhex(hex_clean)
-                        # Show hex dump with offset
                         lines = []
                         for offset in range(0, len(raw_bytes), 16):
                             chunk = raw_bytes[offset : offset + 16]
@@ -80,7 +80,10 @@ with tab_single:
             st.info("Enter a hex string or load sample data.")
 
 with tab_batch:
-    st.markdown("Upload a CSV file with a `data` or `hex` column containing hex-encoded packets.")
+    st.markdown(
+        "Upload a CSV file with hex-encoded packets. "
+        "Supported formats: RockBLOCK export (`Payload` column), or custom CSV (`data`/`hex` column)."
+    )
 
     uploaded = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded:
@@ -91,17 +94,24 @@ with tab_batch:
             input_df = None
 
         if input_df is not None:
-            # Find hex column
+            # Auto-detect hex column — support RockBLOCK format and custom formats
             hex_col = None
-            for candidate in ["data", "hex", "Data", "Hex", "payload", "Payload"]:
+            for candidate in ["Payload", "payload", "data", "Data", "hex", "Hex", "Raw Hex"]:
                 if candidate in input_df.columns:
                     hex_col = candidate
                     break
 
             if hex_col is None:
-                st.error("CSV must contain a column named 'data' or 'hex'.")
-            else:
-                st.write(f"Found {len(input_df)} rows with hex column: `{hex_col}`")
+                # Let user pick the column
+                st.warning("Could not auto-detect hex column.")
+                hex_col = st.selectbox("Select column containing hex data", input_df.columns)
+
+            if hex_col:
+                # Detect RockBLOCK format for additional metadata
+                is_rockblock = "Device" in input_df.columns or "Date Time (UTC)" in input_df.columns
+
+                st.write(f"Found **{len(input_df)}** rows — hex column: `{hex_col}`"
+                         + (" (RockBLOCK format detected)" if is_rockblock else ""))
 
                 if st.button("Decode All", type="primary"):
                     results = []
@@ -110,7 +120,17 @@ with tab_batch:
                         hex_str = str(row[hex_col])
                         result = auto_detect_and_decode(hex_str, force_version=force_version)
 
-                        row_data = {"Row": i + 1, "Version": result.get("version", ""), "CRC": result.get("crc_ok", False)}
+                        row_data = {
+                            "Row": i + 1,
+                            "Version": result.get("version", ""),
+                            "CRC": result.get("crc_ok", False),
+                        }
+
+                        # Include RockBLOCK metadata if available
+                        if is_rockblock:
+                            row_data["Timestamp"] = row.get("Date Time (UTC)", row.get("Date Time", ""))
+                            row_data["Device"] = row.get("Device", "")
+
                         if "error" in result and result["error"]:
                             row_data["Error"] = result["error"]
                         for field in result.get("fields", []):

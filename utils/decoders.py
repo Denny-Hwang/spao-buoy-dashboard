@@ -51,8 +51,9 @@ def decode_fy25(data: bytes) -> dict:
     fields = []
 
     # TENG Current Avg (0-1)
+    # FY25: TENG current is stored as mA × 1000 (µA), divide to get mA
     raw = _uint16(data, 0)
-    fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, raw, "mA"))
+    fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, round(raw / 1000.0, 3), "mA"))
 
     # Previous Session (2-14)
     fields.append(_field("Previous Session", _hex_slice(data, 2, 13), None, _hex_slice(data, 2, 13), "hex"))

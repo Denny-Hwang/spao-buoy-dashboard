@@ -21,13 +21,18 @@ def render_live_data():
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
         return
 
+    # Refresh button
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     tabs = list_device_tabs()
     if not tabs:
         st.info("No device tabs found.")
         return
 
     # Device selector
-    selected = st.selectbox("Select Device (IMEI)", tabs)
+    selected = st.selectbox("Select Device", tabs)
 
     # Auto-refresh
     auto_refresh = st.checkbox("Auto-refresh (every 5 min)")
@@ -103,7 +108,6 @@ def render_live_data():
     new_note = st.text_area("Note", value=current_note, key=f"note_{selected_row}")
 
     if st.button("Save Note"):
-        # Map display index back to original sheet row index
         original_idx = df.index[selected_row]
         success = update_note(selected, original_idx, new_note)
         if success:
