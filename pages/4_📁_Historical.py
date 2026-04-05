@@ -9,18 +9,20 @@ from io import BytesIO
 st.set_page_config(page_title="Historical Data", page_icon="📁", layout="wide")
 st.title("📁 Historical Data")
 
+_errors = []
 try:
     from utils.sheets_client import list_device_tabs, get_device_data, get_all_data, reorder_columns
-    SHEETS_AVAILABLE = True
-except Exception as _import_err:
-    SHEETS_AVAILABLE = False
-    _IMPORT_ERROR = _import_err
+except Exception as e:
+    _errors.append(f"sheets_client: {type(e).__name__}: {e}")
+
+SHEETS_AVAILABLE = len(_errors) == 0
 
 
 def render_historical():
     if not SHEETS_AVAILABLE:
-        st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
-        st.error(f"Import error: {_IMPORT_ERROR}")
+        st.error("Failed to load required modules:")
+        for err in _errors:
+            st.error(err)
         return
 
     # Refresh button

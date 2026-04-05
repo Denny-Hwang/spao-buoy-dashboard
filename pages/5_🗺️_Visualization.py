@@ -9,20 +9,36 @@ import numpy as np
 st.set_page_config(page_title="Visualization", page_icon="🗺️", layout="wide")
 st.title("🗺️ Visualization")
 
+_errors = []
 try:
     from utils.sheets_client import list_device_tabs, get_device_data
+except Exception as e:
+    _errors.append(f"sheets_client: {type(e).__name__}: {e}")
+
+try:
     from utils.map_utils import build_drift_map, BASEMAPS
+except Exception as e:
+    _errors.append(f"map_utils: {type(e).__name__}: {e}")
+
+try:
     from utils.plot_utils import (
         make_time_series, make_scatter, make_3d_scatter, apply_plot_style, COLORS,
         LINE_WIDTH, MARKER_SIZE, PLOT_HEIGHT,
     )
-    from streamlit_folium import st_folium
-    import plotly.graph_objects as go
+except Exception as e:
+    _errors.append(f"plot_utils: {type(e).__name__}: {e}")
 
-    SHEETS_AVAILABLE = True
-except Exception as _import_err:
-    SHEETS_AVAILABLE = False
-    _IMPORT_ERROR = _import_err
+try:
+    from streamlit_folium import st_folium
+except Exception as e:
+    _errors.append(f"streamlit_folium: {type(e).__name__}: {e}")
+
+try:
+    import plotly.graph_objects as go
+except Exception as e:
+    _errors.append(f"plotly: {type(e).__name__}: {e}")
+
+SHEETS_AVAILABLE = len(_errors) == 0
 
 
 def _find_time_col(df: pd.DataFrame) -> str | None:
@@ -37,8 +53,9 @@ def _find_time_col(df: pd.DataFrame) -> str | None:
 
 def render_visualization():
     if not SHEETS_AVAILABLE:
-        st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
-        st.error(f"Import error: {_IMPORT_ERROR}")
+        st.error("Failed to load required modules:")
+        for err in _errors:
+            st.error(err)
         return
 
     # Refresh button
@@ -98,7 +115,7 @@ def render_visualization():
 
     # --- Drift Map ---
     with tab_map:
-        basemap = st.selectbox("Basemap", list(BASEMAPS.keys()), index=0)  # Satellite first
+        basemap = st.selectbox("Basemap", list(BASEMAPS.keys()), index=0)
 
         lat_cols = [c for c in all_df.columns if "latitude" in c.lower()]
         lon_cols = [c for c in all_df.columns if "longitude" in c.lower()]
@@ -121,10 +138,8 @@ def render_visualization():
         if not time_col:
             st.warning("No time column found for time-series plots.")
         else:
-            # Drop rows where time is NaT for clean plotting
             plot_base = all_df.dropna(subset=[time_col])
 
-            # Standard sensor plots
             sensor_configs = [
                 ("Battery", "V", ["battery"]),
                 ("SST", "°C", ["sst", "ocean temp"]),
@@ -155,7 +170,6 @@ def render_visualization():
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
-            # Correlation: Pressure vs SST
             pres_cols = [c for c in plot_base.columns if "pressure" in c.lower()]
             sst_cols = [c for c in plot_base.columns if "sst" in c.lower() or "ocean temp" in c.lower()]
             if pres_cols and sst_cols:
@@ -172,7 +186,6 @@ def render_visualization():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Humidity + Dewpoint (Magnus formula)
             hum_cols = [c for c in plot_base.columns if "humidity" in c.lower()]
             temp_cols = [c for c in plot_base.columns if "internal temp" in c.lower()]
             if hum_cols and temp_cols:
