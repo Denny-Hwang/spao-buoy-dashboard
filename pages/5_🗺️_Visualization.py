@@ -11,7 +11,10 @@ st.title("🗺️ Visualization")
 
 _errors = []
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data
+    from utils.sheets_client import (
+        list_device_tabs, get_device_data,
+        get_device_ids, get_device_column,
+    )
 except Exception as e:
     _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
@@ -42,7 +45,7 @@ SHEETS_AVAILABLE = len(_errors) == 0
 
 
 def _find_time_col(df: pd.DataFrame) -> str | None:
-    """Find and parse the best time column in the DataFrame."""
+    """Find and parse the best time column."""
     candidates = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if not candidates:
         return None
@@ -58,7 +61,6 @@ def render_visualization():
             st.error(err)
         return
 
-    # Refresh button
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -68,28 +70,41 @@ def render_visualization():
         st.info("No device tabs found.")
         return
 
-    # Sidebar: device selection
+    # Load all tabs
+    frames = []
+    for tab in tabs:
+        df = get_device_data(tab)
+        if not df.empty:
+            df = df.copy()
+            df["Device Tab"] = tab
+            frames.append(df)
+
+    if not frames:
+        st.info("No data available.")
+        return
+
+    all_df = pd.concat(frames, ignore_index=True)
+
+    # Determine device column and IDs
+    dev_col = get_device_column(all_df) or "Device Tab"
+    device_ids = get_device_ids(all_df)
+    if not device_ids:
+        device_ids = tabs
+        dev_col = "Device Tab"
+
+    # Sidebar: device selection by actual Device ID
     st.sidebar.subheader("Data Source")
-    selected_devices = st.sidebar.multiselect("Devices", tabs, default=tabs)
+    selected_devices = st.sidebar.multiselect("Devices", device_ids, default=device_ids)
 
     if not selected_devices:
         st.info("Select at least one device.")
         return
 
-    # Load and merge data
-    frames = []
-    for tab_name in selected_devices:
-        df = get_device_data(tab_name)
-        if not df.empty:
-            df = df.copy()
-            df["Device"] = tab_name
-            frames.append(df)
-
-    if not frames:
-        st.info("No data available for selected devices.")
+    # Filter by selected devices
+    all_df = all_df[all_df[dev_col].isin(selected_devices)].copy()
+    if all_df.empty:
+        st.info("No data for selected devices.")
         return
-
-    all_df = pd.concat(frames, ignore_index=True)
 
     # Parse time column
     time_col = _find_time_col(all_df)
@@ -126,7 +141,7 @@ def render_visualization():
                 basemap=basemap,
                 lat_col=lat_cols[0],
                 lon_col=lon_cols[0],
-                device_col="Device",
+                device_col=dev_col,
                 highlight_latest=True,
             )
             st_folium(m, width=None, height=600, returned_objects=[])
@@ -166,7 +181,7 @@ def render_visualization():
                         y_col=y_col,
                         title=title,
                         y_unit=unit,
-                        color_col="Device",
+                        color_col=dev_col,
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -181,7 +196,7 @@ def render_visualization():
                     title="Pressure vs SST",
                     x_unit="°C",
                     y_unit="psi",
-                    color_col="Device",
+                    color_col=dev_col,
                     trendline=True,
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -249,7 +264,8 @@ def render_visualization():
             with c4:
                 plot_type = st.selectbox("Plot Type", ["Line", "Scatter", "X-Y with Trendline", "3D Scatter"])
             with c5:
-                color_var = st.selectbox("Color By", ["None", "Device"] + numeric_cols, key="custom_color")
+                color_options = ["None", dev_col] + [c for c in numeric_cols if c != dev_col]
+                color_var = st.selectbox("Color By", color_options, key="custom_color")
 
             color_col = color_var if color_var != "None" else None
 

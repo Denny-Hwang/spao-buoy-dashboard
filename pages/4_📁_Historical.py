@@ -11,7 +11,10 @@ st.title("📁 Historical Data")
 
 _errors = []
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data, get_all_data, reorder_columns
+    from utils.sheets_client import (
+        list_device_tabs, get_device_data, reorder_columns,
+        get_device_ids, get_device_column,
+    )
 except Exception as e:
     _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
@@ -25,7 +28,6 @@ def render_historical():
             st.error(err)
         return
 
-    # Refresh button
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -35,15 +37,9 @@ def render_historical():
         st.info("No device tabs found.")
         return
 
-    # Device selector — multi-select for filtering
-    selected_devices = st.multiselect("Select Devices", tabs, default=tabs)
-    if not selected_devices:
-        st.info("Select at least one device.")
-        return
-
-    # Load and merge data
+    # Load all tabs
     frames = []
-    for tab in selected_devices:
+    for tab in tabs:
         df = get_device_data(tab)
         if not df.empty:
             df = df.copy()
@@ -51,10 +47,28 @@ def render_historical():
             frames.append(df)
 
     if not frames:
-        st.info("No data available for selected devices.")
+        st.info("No data available.")
         return
 
-    df = pd.concat(frames, ignore_index=True)
+    all_data = pd.concat(frames, ignore_index=True)
+
+    # Determine device column and IDs
+    dev_col = get_device_column(all_data) or "Device Tab"
+    device_ids = get_device_ids(all_data)
+    if not device_ids:
+        device_ids = tabs
+        dev_col = "Device Tab"
+
+    # Device filter
+    selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
+    if not selected_devices:
+        st.info("Select at least one device.")
+        return
+
+    df = all_data[all_data[dev_col].isin(selected_devices)].copy()
+    if df.empty:
+        st.info("No data for selected devices.")
+        return
 
     # Date range filter
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]

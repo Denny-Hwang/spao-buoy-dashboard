@@ -8,11 +8,13 @@ import pandas as pd
 st.set_page_config(page_title="Dashboard", page_icon="📡", layout="wide")
 st.title("📡 Dashboard")
 
-# Separate imports to pinpoint failures
 _errors = []
 
 try:
-    from utils.sheets_client import list_device_tabs, get_device_data, get_all_data, reorder_columns
+    from utils.sheets_client import (
+        list_device_tabs, get_device_data, reorder_columns,
+        get_device_ids, get_device_column,
+    )
 except Exception as e:
     _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
@@ -36,7 +38,6 @@ def render_dashboard():
             st.error(err)
         return
 
-    # Refresh button
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -48,15 +49,9 @@ def render_dashboard():
         st.info("No device tabs found in the Google Sheet.")
         return
 
-    # Device selector
-    selected_devices = st.multiselect("Select Devices", tabs, default=tabs)
-    if not selected_devices:
-        st.info("Select at least one device.")
-        return
-
-    # Load data for selected devices
+    # Load all tabs
     frames = []
-    for tab in selected_devices:
+    for tab in tabs:
         df = get_device_data(tab)
         if not df.empty:
             df = df.copy()
@@ -64,10 +59,30 @@ def render_dashboard():
             frames.append(df)
 
     if not frames:
-        st.info("No data available for selected devices.")
+        st.info("No data available.")
         return
 
     all_data = pd.concat(frames, ignore_index=True)
+
+    # Determine device column and unique device IDs
+    dev_col = get_device_column(all_data) or "Device Tab"
+    device_ids = get_device_ids(all_data)
+
+    if not device_ids:
+        device_ids = tabs
+        dev_col = "Device Tab"
+
+    # Device filter
+    selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
+    if not selected_devices:
+        st.info("Select at least one device.")
+        return
+
+    # Filter data by selected devices
+    all_data = all_data[all_data[dev_col].isin(selected_devices)]
+    if all_data.empty:
+        st.info("No data for selected devices.")
+        return
 
     # System status
     time_cols = [c for c in all_data.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
@@ -79,10 +94,9 @@ def render_dashboard():
                 delta = pd.Timestamp.now() - latest
                 hours = delta.total_seconds() / 3600
                 if hours < 1:
-                    status_text = f"Last data received: {int(delta.total_seconds() / 60)} minutes ago"
+                    st.success(f"Last data received: {int(delta.total_seconds() / 60)} minutes ago")
                 else:
-                    status_text = f"Last data received: {hours:.1f} hours ago"
-                st.success(status_text)
+                    st.success(f"Last data received: {hours:.1f} hours ago")
         except Exception:
             pass
 
@@ -90,26 +104,24 @@ def render_dashboard():
 
     # Device summary cards
     cols = st.columns(min(len(selected_devices), 4))
-    for i, tab_name in enumerate(selected_devices):
+    for i, device_id in enumerate(selected_devices):
         col = cols[i % len(cols)]
-        device_df = all_data[all_data["Device Tab"] == tab_name] if "Device Tab" in all_data.columns else pd.DataFrame()
+        device_df = all_data[all_data[dev_col] == device_id]
 
         with col:
-            st.markdown(f"### {tab_name}")
+            st.markdown(f"### {device_id}")
             if device_df.empty:
                 st.write("No data")
                 continue
 
             st.metric("Messages", len(device_df))
 
-            # Battery
             batt_cols = [c for c in device_df.columns if "battery" in c.lower()]
             if batt_cols:
                 last_batt = pd.to_numeric(device_df[batt_cols[0]], errors="coerce").dropna()
                 if not last_batt.empty:
                     st.metric("Battery", f"{last_batt.iloc[-1]:.3f} V")
 
-            # GPS
             lat_cols = [c for c in device_df.columns if "latitude" in c.lower()]
             lon_cols = [c for c in device_df.columns if "longitude" in c.lower()]
             if lat_cols and lon_cols:
@@ -120,7 +132,7 @@ def render_dashboard():
 
             st.divider()
 
-    # Trajectory map — satellite basemap, shows full track with latest point highlighted
+    # Trajectory map
     st.subheader("Device Trajectories")
     lat_cols = [c for c in all_data.columns if "latitude" in c.lower()]
     lon_cols = [c for c in all_data.columns if "longitude" in c.lower()]
@@ -130,7 +142,7 @@ def render_dashboard():
             basemap="Satellite",
             lat_col=lat_cols[0],
             lon_col=lon_cols[0],
-            device_col="Device Tab",
+            device_col=dev_col,
             highlight_latest=True,
         )
         st_folium(drift_map, width=None, height=500, returned_objects=[])
