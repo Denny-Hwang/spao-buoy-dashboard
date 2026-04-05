@@ -29,6 +29,11 @@ def render_visualization():
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
         return
 
+    # Refresh button
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     tabs = list_device_tabs()
     if not tabs:
         st.info("No device tabs found.")
@@ -44,11 +49,12 @@ def render_visualization():
 
     # Load and merge data
     frames = []
-    for imei in selected_devices:
-        df = get_device_data(imei)
+    for tab_name in selected_devices:
+        df = get_device_data(tab_name)
         if not df.empty:
             df = df.copy()
-            df["IMEI"] = imei
+            if "IMEI" not in df.columns:
+                df["IMEI"] = tab_name
             frames.append(df)
 
     if not frames:
@@ -162,8 +168,6 @@ def render_visualization():
                 plot_df = plot_df.dropna(subset=[hum_cols[0], temp_cols[0]])
 
                 if not plot_df.empty:
-                    # Magnus formula: Td = (b * alpha) / (a - alpha)
-                    # where alpha = (a * T) / (b + T) + ln(RH/100)
                     a, b = 17.27, 237.7
                     T = plot_df[temp_cols[0]]
                     RH = plot_df[hum_cols[0]]

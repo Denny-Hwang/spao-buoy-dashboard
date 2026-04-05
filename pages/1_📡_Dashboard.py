@@ -23,6 +23,11 @@ def render_dashboard():
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
         return
 
+    # Refresh button
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     with st.spinner("Loading device data..."):
         tabs = list_device_tabs()
 
@@ -56,14 +61,18 @@ def render_dashboard():
         except Exception:
             pass
 
+    # Device identifier column
+    device_col = "Device Tab" if "Device Tab" in all_data.columns else "IMEI"
+
     # Device summary cards
-    cols = st.columns(min(len(tabs), 4))
-    for i, imei in enumerate(tabs):
+    device_ids = all_data[device_col].unique() if device_col in all_data.columns else tabs
+    cols = st.columns(min(len(device_ids), 4))
+    for i, device_id in enumerate(device_ids):
         col = cols[i % len(cols)]
-        device_df = all_data[all_data["IMEI"] == imei] if "IMEI" in all_data.columns else pd.DataFrame()
+        device_df = all_data[all_data[device_col] == device_id] if device_col in all_data.columns else pd.DataFrame()
 
         with col:
-            st.markdown(f"### {imei}")
+            st.markdown(f"### {device_id}")
             if device_df.empty:
                 st.write("No data")
                 continue
@@ -92,7 +101,8 @@ def render_dashboard():
     lat_cols = [c for c in all_data.columns if "latitude" in c.lower()]
     lon_cols = [c for c in all_data.columns if "longitude" in c.lower()]
     if lat_cols and lon_cols:
-        mini_map = build_mini_map(all_data, lat_col=lat_cols[0], lon_col=lon_cols[0])
+        mini_map = build_mini_map(all_data, lat_col=lat_cols[0], lon_col=lon_cols[0],
+                                  device_col=device_col)
         st_folium(mini_map, width=None, height=350, returned_objects=[])
     else:
         st.info("No GPS data available for mapping.")

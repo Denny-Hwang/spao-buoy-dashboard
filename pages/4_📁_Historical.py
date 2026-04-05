@@ -21,6 +21,11 @@ def render_historical():
         st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
         return
 
+    # Refresh button
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     # Source selector
     col1, col2 = st.columns([2, 1])
     with col1:
