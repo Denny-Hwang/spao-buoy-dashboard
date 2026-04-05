@@ -8,19 +8,32 @@ import pandas as pd
 st.set_page_config(page_title="Dashboard", page_icon="📡", layout="wide")
 st.title("📡 Dashboard")
 
+# Separate imports to pinpoint failures
+_errors = []
+
 try:
     from utils.sheets_client import list_device_tabs, get_device_data, get_all_data, reorder_columns
-    from utils.map_utils import build_drift_map, BASEMAPS
-    from streamlit_folium import st_folium
+except Exception as e:
+    _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
-    SHEETS_AVAILABLE = True
-except Exception:
-    SHEETS_AVAILABLE = False
+try:
+    from utils.map_utils import build_drift_map, BASEMAPS
+except Exception as e:
+    _errors.append(f"map_utils: {type(e).__name__}: {e}")
+
+try:
+    from streamlit_folium import st_folium
+except Exception as e:
+    _errors.append(f"streamlit_folium: {type(e).__name__}: {e}")
+
+SHEETS_AVAILABLE = len(_errors) == 0
 
 
 def render_dashboard():
     if not SHEETS_AVAILABLE:
-        st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
+        st.error("Failed to load required modules:")
+        for err in _errors:
+            st.error(err)
         return
 
     # Refresh button

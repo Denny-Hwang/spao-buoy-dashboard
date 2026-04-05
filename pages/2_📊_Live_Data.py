@@ -9,16 +9,20 @@ from io import BytesIO
 st.set_page_config(page_title="Live Data", page_icon="📊", layout="wide")
 st.title("📊 Live Data")
 
+_errors = []
 try:
     from utils.sheets_client import list_device_tabs, get_device_data, update_note, reorder_columns
-    SHEETS_AVAILABLE = True
-except Exception:
-    SHEETS_AVAILABLE = False
+except Exception as e:
+    _errors.append(f"sheets_client: {type(e).__name__}: {e}")
+
+SHEETS_AVAILABLE = len(_errors) == 0
 
 
 def render_live_data():
     if not SHEETS_AVAILABLE:
-        st.warning("Google Sheets connection not configured. Add `gcp_service_account` to Streamlit secrets.")
+        st.error("Failed to load required modules:")
+        for err in _errors:
+            st.error(err)
         return
 
     # Refresh button
