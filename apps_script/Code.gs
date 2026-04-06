@@ -57,9 +57,9 @@ function decodeFY25(bytes) {
   var prev1stRB   = readUint16(bytes, 2) / 10.0;
   var prev2ndRB   = readUint16(bytes, 4) / 10.0;
   var prevGPS     = readUint16(bytes, 6) / 10.0;
-  var prevTengAvg = readUint16(bytes, 8) / 1000.0;
-  var prevTengMax = readUint16(bytes, 10) / 1000.0;
-  var prevSuperCap = readUint16(bytes, 12) / 1000.0;
+  var prevTengCurr = readUint16(bytes, 8) / 1000.0;  // mA×1000 → mA
+  var prevBattery  = readUint16(bytes, 10) / 1000.0; // mV → V
+  var prevSuperCap = readUint16(bytes, 12) / 1000.0; // mV → V
   var prevEndMarker = bytes[14];
 
   // Current session
@@ -81,7 +81,7 @@ function decodeFY25(bytes) {
     version: "FY25", crcOk: crcOk,
     tengCurr: tengCurr,
     prev1stRB: prev1stRB, prev2ndRB: prev2ndRB, prevGPS: prevGPS,
-    prevTengAvg: prevTengAvg, prevTengMax: prevTengMax,
+    prevTengCurr: prevTengCurr, prevBattery: prevBattery,
     prevSuperCap: prevSuperCap, prevEndMarker: prevEndMarker,
     battery: battery, lat: lat, lon: lon, gpsTime: gpsTime,
     pressure: pressure, intTemp: intTemp,

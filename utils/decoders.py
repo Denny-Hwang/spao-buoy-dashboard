@@ -47,7 +47,17 @@ def _int32(data: bytes, offset: int) -> int:
 
 
 def decode_fy25(data: bytes) -> dict:
-    """Decode FY25 38-byte packet."""
+    """Decode FY25 38-byte packet.
+
+    Previous Session layout (bytes 2-14, 13 bytes) — from Arduino V3 EEPROM:
+      2-3:   Prev 1st RB Time  (uint16, ×100ms, /10→s)
+      4-5:   Prev 2nd RB Time  (uint16, ×100ms, /10→s)
+      6-7:   Prev GPS Time     (uint16, ×100ms, /10→s)
+      8-9:   Prev TENG Current (uint16, mA×1000, /1000→mA)
+      10-11: Prev Battery      (uint16, mV, /1000→V)
+      12-13: Prev SuperCap     (uint16, mV, /1000→V)
+      14:    Prev End Marker   (uint8)
+    """
     fields = []
 
     # TENG Current Avg (0-1)
@@ -56,7 +66,6 @@ def decode_fy25(data: bytes) -> dict:
     fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, round(raw / 1000.0, 3), "mA"))
 
     # --- Previous Session (bytes 2-14, 13 bytes) ---
-    # Decoded into individual fields, matching FY26(v3) structure
 
     # Prev 1st RB Time (2-3) — satellite TX time for first RockBLOCK attempt
     raw = _uint16(data, 2)
@@ -70,19 +79,19 @@ def decode_fy25(data: bytes) -> dict:
     raw = _uint16(data, 6)
     fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
 
-    # Prev TENG Avg (8-9) — FY25 uses µA encoding, /1000 for mA
+    # Prev TENG Current (8-9) — FY25 uses µA encoding (mA×1000)
     raw = _uint16(data, 8)
-    fields.append(_field("Prev TENG Avg", _hex_slice(data, 8, 2), raw, round(raw / 1000.0, 3), "mA"))
+    fields.append(_field("Prev TENG Current", _hex_slice(data, 8, 2), raw, round(raw / 1000.0, 3), "mA"))
 
-    # Prev TENG Max (10-11) — FY25 uses µA encoding, /1000 for mA
+    # Prev Battery (10-11) — previous session battery voltage in mV
     raw = _uint16(data, 10)
-    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 1000.0, 3), "mA"))
+    fields.append(_field("Prev Battery", _hex_slice(data, 10, 2), raw, round(raw / 1000, 3), "V"))
 
-    # Prev SuperCap (12-13) — FY25 reports previous SuperCap voltage
+    # Prev SuperCap (12-13) — previous session super-capacitor voltage in mV
     raw = _uint16(data, 12)
     fields.append(_field("Prev SuperCap", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
 
-    # Prev End Marker (14) — 1 byte in FY25 (vs 2 bytes in FY26)
+    # Prev End Marker (14) — 1 byte in FY25
     raw = data[14]
     fields.append(_field("Prev End Marker", _hex_slice(data, 14, 1), raw, raw, ""))
 
