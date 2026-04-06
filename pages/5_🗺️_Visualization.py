@@ -154,6 +154,9 @@ def render_visualization():
         else:
             plot_base = all_df.dropna(subset=[time_col])
 
+            # Exclude "Prev" columns — only plot current-session sensors
+            _skip = {"Device", "Device Tab", "IMEI"}
+
             sensor_configs = [
                 ("Battery", "V", ["battery"]),
                 ("SST", "°C", ["sst", "ocean temp"]),
@@ -161,12 +164,14 @@ def render_visualization():
                 ("Internal Temp", "°C", ["internal temp", "int temp"]),
                 ("Humidity", "%RH", ["humidity"]),
                 ("TENG Current Avg", "mA", ["teng current", "teng avg"]),
+                ("SuperCap Voltage", "V", ["supercap"]),
             ]
 
             for title, unit, keywords in sensor_configs:
                 matching = [c for c in plot_base.columns
                             if any(kw in c.lower() for kw in keywords)
-                            and c not in ("Device", "Device Tab", "IMEI")]
+                            and c not in _skip
+                            and not c.lower().startswith("prev")]
                 if matching:
                     y_col = matching[0]
                     plot_df = plot_base.copy()
