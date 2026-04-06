@@ -145,7 +145,7 @@ def render_dashboard():
             device_col=dev_col,
             highlight_latest=True,
         )
-        st_folium(drift_map, width=None, height=500, returned_objects=[])
+        st_folium(drift_map, width=None, height=700, returned_objects=[])
     else:
         st.info("No GPS data available for mapping.")
 

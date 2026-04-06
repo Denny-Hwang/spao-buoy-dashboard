@@ -52,17 +52,16 @@ def _popup_html(row: pd.Series, device_name: str = "") -> str:
     """Generate HTML popup content for a map marker with sensor details."""
     lines = []
     if device_name:
-        lines.append(f"<b style='font-size:14px'>{device_name}</b><hr style='margin:4px 0'>")
+        lines.append(f"<b style='font-size:11px'>{device_name}</b><hr style='margin:2px 0'>")
     for col, val in row.items():
         if col in ("interpolated", "Device Tab", "IMEI", "_parsed_time"):
             continue
         if pd.isna(val):
             continue
-        # Format numeric values
         if isinstance(val, float):
-            lines.append(f"<b>{col}:</b> {val:.4f}")
+            lines.append(f"<span style='font-size:10px'><b>{col}:</b> {val:.4f}</span>")
         else:
-            lines.append(f"<b>{col}:</b> {val}")
+            lines.append(f"<span style='font-size:10px'><b>{col}:</b> {val}</span>")
     return "<br>".join(lines)
 
 
