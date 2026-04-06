@@ -18,7 +18,7 @@ SCOPES = [
 EXCLUDED_TABS = {"_errors", "Sheet1"}
 
 # Columns containing long hex strings — always placed at the end of tables
-_HEX_COLUMNS = {"Raw Hex", "Previous Session", "Payload", "data", "hex", "Hex"}
+_HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
 
 
 @st.cache_resource
@@ -96,16 +96,10 @@ def decode_rockblock_data(records: list[dict]) -> pd.DataFrame:
             "CRC Valid": result.get("crc_ok", False) if result else False,
         }
 
-        # Add decoded sensor fields with units in column names
+        # Add decoded sensor fields — use clean names (units shown in plots/axis labels)
         if result and result.get("fields"):
             for field in result["fields"]:
-                unit = field.get("unit", "")
-                name = field["name"]
-                if unit and unit != "hex":
-                    col_name = f"{name} ({unit})"
-                else:
-                    col_name = name
-                decoded_row[col_name] = field["value"]
+                decoded_row[field["name"]] = field["value"]
 
         if "error" in result and result["error"]:
             decoded_row["Decode Error"] = result["error"]
