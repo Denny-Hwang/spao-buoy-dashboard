@@ -49,14 +49,14 @@ def _int32(data: bytes, offset: int) -> int:
 def decode_fy25(data: bytes) -> dict:
     """Decode FY25 38-byte packet.
 
-    Previous Session layout (bytes 2-14, 13 bytes) — mirrors FY26(v3) structure:
-      2-3:   Prev 1st RB Time  (uint16, ×100ms, /10→s)
-      4-5:   Prev 2nd RB Time  (uint16, ×100ms, /10→s)
-      6-7:   Prev GPS Time     (uint16, ×100ms, /10→s)
-      8-9:   Prev TENG Current (uint16, µA, /1000→mA)
-      10-11: Prev TENG Max     (uint16, µA, /1000→mA)
-      12-13: Prev Battery      (uint16, mV, /1000→V)
-      14:    Prev End Marker   (uint8)
+    Previous Session layout (bytes 2-14, 13 bytes) — FY25 Bering Sea deployment:
+      2-3:   Prev 2nd RB Time       (uint16, ×100ms, /10→s; 0 if no retry)
+      4-5:   Prev GPS Time          (uint16, ×100ms, /10→s)
+      6-7:   Prev SuperCap Init V   (uint16, mV, /1000→V)
+      8-9:   Prev SuperCap 1st F    (uint16, mV, /1000→V; 0 if no 1st charge)
+      10-11: (unused, always 0x0000)
+      12-13: Prev SuperCap after TX (uint16, mV, /1000→V)
+      14:    (unused, always 0x00)
     """
     fields = []
 
@@ -67,33 +67,33 @@ def decode_fy25(data: bytes) -> dict:
 
     # --- Previous Session (bytes 2-14, 13 bytes) ---
 
-    # Prev 1st RB Time (2-3) — satellite TX time for first RockBLOCK attempt
+    # Prev 2nd RB Time (2-3) — second RockBLOCK attempt time; 0 if first succeeded
     raw = _uint16(data, 2)
-    fields.append(_field("Prev 1st RB Time", _hex_slice(data, 2, 2), raw, round(raw / 10, 1), "s"))
+    fields.append(_field("Prev 2nd RB Time", _hex_slice(data, 2, 2), raw, round(raw / 10, 1), "s"))
 
-    # Prev 2nd RB Time (4-5) — satellite TX time for second RockBLOCK attempt
+    # Prev GPS Time (4-5) — GPS acquisition time from previous session
     raw = _uint16(data, 4)
-    fields.append(_field("Prev 2nd RB Time", _hex_slice(data, 4, 2), raw, round(raw / 10, 1), "s"))
+    fields.append(_field("Prev GPS Time", _hex_slice(data, 4, 2), raw, round(raw / 10, 1), "s"))
 
-    # Prev GPS Time (6-7) — GPS acquisition time from previous session
+    # Prev SuperCap Init V (6-7) — capacitor voltage at session start
     raw = _uint16(data, 6)
-    fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
+    fields.append(_field("Prev SuperCap Init", _hex_slice(data, 6, 2), raw, round(raw / 1000, 3), "V"))
 
-    # Prev TENG Current (8-9) — FY25 uses µA encoding (÷1000→mA)
+    # Prev SuperCap after 1st F (8-9) — capacitor voltage after first flyback charge
     raw = _uint16(data, 8)
-    fields.append(_field("Prev TENG Current", _hex_slice(data, 8, 2), raw, round(raw / 1000.0, 3), "mA"))
+    fields.append(_field("Prev SuperCap 1st F", _hex_slice(data, 8, 2), raw, round(raw / 1000, 3), "V"))
 
-    # Prev TENG Max (10-11) — peak TENG current, same µA encoding (÷1000→mA)
+    # Unused (10-11) — always 0x0000 in FY25 deployment
     raw = _uint16(data, 10)
-    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 1000.0, 3), "mA"))
+    fields.append(_field("(Reserved)", _hex_slice(data, 10, 2), raw, raw, ""))
 
-    # Prev Battery (12-13) — previous session battery voltage in mV (÷1000→V)
+    # Prev SuperCap after TX (12-13) — capacitor voltage after transmission completed
     raw = _uint16(data, 12)
-    fields.append(_field("Prev Battery", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
+    fields.append(_field("Prev SuperCap after TX", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
 
-    # Prev End Marker (14) — 1 byte in FY25
+    # Unused (14) — always 0x00 in FY25 deployment
     raw = data[14]
-    fields.append(_field("Prev End Marker", _hex_slice(data, 14, 1), raw, raw, ""))
+    fields.append(_field("(Reserved)", _hex_slice(data, 14, 1), raw, raw, ""))
 
     # --- Current Session ---
 

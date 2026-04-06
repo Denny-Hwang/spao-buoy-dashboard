@@ -53,14 +53,14 @@ function decodeFY25(bytes) {
   // FY25: TENG current is stored as mA × 1000 (µA), divide to get mA
   var tengCurr = readUint16(bytes, 0) / 1000.0;
 
-  // Previous session fields (bytes 2-14)
-  var prev1stRB   = readUint16(bytes, 2) / 10.0;
-  var prev2ndRB   = readUint16(bytes, 4) / 10.0;
-  var prevGPS     = readUint16(bytes, 6) / 10.0;
-  var prevTengCurr = readUint16(bytes, 8) / 1000.0;  // µA → mA
-  var prevTengMax  = readUint16(bytes, 10) / 1000.0; // µA → mA
-  var prevBattery  = readUint16(bytes, 12) / 1000.0; // mV → V
-  var prevEndMarker = bytes[14];
+  // Previous session fields (bytes 2-14) — FY25 Bering Sea deployment
+  var prev2ndRB       = readUint16(bytes, 2) / 10.0;   // ×100ms → s; 0 if no retry
+  var prevGPS         = readUint16(bytes, 4) / 10.0;   // ×100ms → s
+  var prevSCapInit    = readUint16(bytes, 6) / 1000.0;  // mV → V
+  var prevSCap1stF    = readUint16(bytes, 8) / 1000.0;  // mV → V; 0 if no 1st charge
+  // bytes 10-11: unused (always 0x0000)
+  var prevSCapAfterTX = readUint16(bytes, 12) / 1000.0; // mV → V
+  // byte 14: unused (always 0x00)
 
   // Current session
   var battery  = readUint16(bytes, 15) / 1000.0;
@@ -80,9 +80,9 @@ function decodeFY25(bytes) {
   return {
     version: "FY25", crcOk: crcOk,
     tengCurr: tengCurr,
-    prev1stRB: prev1stRB, prev2ndRB: prev2ndRB, prevGPS: prevGPS,
-    prevTengCurr: prevTengCurr, prevTengMax: prevTengMax,
-    prevBattery: prevBattery, prevEndMarker: prevEndMarker,
+    prev2ndRB: prev2ndRB, prevGPS: prevGPS,
+    prevSCapInit: prevSCapInit, prevSCap1stF: prevSCap1stF,
+    prevSCapAfterTX: prevSCapAfterTX,
     battery: battery, lat: lat, lon: lon, gpsTime: gpsTime,
     pressure: pressure, intTemp: intTemp,
     humidity: humidity, sst: sst, superCap: superCap
