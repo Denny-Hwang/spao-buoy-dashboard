@@ -21,24 +21,59 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("SPAO Buoy Dashboard")
+# --- Intro Page ---
+st.title("🌊 SPAO Buoy Dashboard")
+st.markdown("Real-time monitoring system for **Self-Powered Arctic Ocean** buoy deployments.")
+
+st.divider()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown(
+        """
+        ### 📡 Dashboard
+        Device status at a glance — battery levels, GPS positions,
+        and satellite trajectory map with the latest location highlighted.
+
+        ### 📊 Live Data
+        Browse real-time telemetry data in a sortable table.
+        Filter by device and date range, add notes directly in the table,
+        and export to CSV.
+
+        ### 🔧 Decoder
+        Paste a hex string to decode any buoy packet instantly.
+        Upload a CSV of RockBLOCK exports to batch-decode all payloads at once.
+        """
+    )
+
+with col2:
+    st.markdown(
+        """
+        ### 📁 Historical Data
+        View and compare past deployment data across multiple devices.
+        Summary statistics for battery, date range, and record count.
+
+        ### 🗺️ Visualization
+        Interactive drift trajectory maps (satellite imagery) and
+        time-series sensor plots — battery, SST, pressure, humidity,
+        TENG current, and more. Filter and color-code by device.
+        """
+    )
+
+st.divider()
+
 st.markdown(
     """
-    Welcome to the **SPAO (Self-Powered Arctic Ocean) Buoy Dashboard**.
-
-    Use the sidebar to navigate between pages:
-
-    - **Dashboard** — Device overview and quick status
-    - **Live Data** — Real-time data table with notes editing
-    - **Decoder** — Standalone packet decoder tool
-    - **Historical** — Past deployment data viewer
-    - **Visualization** — Maps and sensor plots
+    ### Quick Start
+    1. Select a page from the **sidebar** (or tap ☰ on mobile)
+    2. Data loads automatically from Google Sheets
+    3. Use **Select Devices** to filter by buoy
+    4. Click **🔄 Refresh Data** on any page to pull the latest data
     """
 )
 
-st.info("Select a page from the sidebar to get started.")
-
-# Debug: show secrets key availability (values are NOT shown)
+# System diagnostics (collapsed by default)
 with st.expander("System Diagnostics", expanded=False):
     st.write("**Secrets keys available:**", list(st.secrets.keys()))
     if "gcp_service_account" in st.secrets:
@@ -48,7 +83,6 @@ with st.expander("System Diagnostics", expanded=False):
     else:
         st.error("gcp_service_account secret NOT found")
 
-    # Check package availability
     packages = {}
     for pkg in ["gspread", "google.oauth2.service_account", "streamlit_folium", "folium", "plotly"]:
         try:
@@ -63,17 +97,9 @@ with st.expander("System Diagnostics", expanded=False):
         else:
             st.write(f"- {pkg}: {status}")
 
-    # Try sheets client import
-    try:
-        from utils.sheets_client import get_client
-        st.success("sheets_client import OK")
-    except Exception as e:
-        st.error(f"sheets_client import FAILED: {type(e).__name__}: {e}")
-
-    # Try creating gspread client
     try:
         from utils.sheets_client import get_client
         client = get_client()
-        st.success(f"gspread client created OK: {type(client)}")
+        st.success("Google Sheets connection OK")
     except Exception as e:
-        st.error(f"gspread client FAILED: {type(e).__name__}: {e}")
+        st.error(f"Google Sheets connection FAILED: {type(e).__name__}: {e}")

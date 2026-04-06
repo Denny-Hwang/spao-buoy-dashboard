@@ -52,6 +52,17 @@ function crc8(bytes, len) {
 function decodeFY25(bytes) {
   // FY25: TENG current is stored as mA × 1000 (µA), divide to get mA
   var tengCurr = readUint16(bytes, 0) / 1000.0;
+
+  // Previous session fields (bytes 2-14)
+  var prev1stRB   = readUint16(bytes, 2) / 10.0;
+  var prev2ndRB   = readUint16(bytes, 4) / 10.0;
+  var prevGPS     = readUint16(bytes, 6) / 10.0;
+  var prevTengAvg = readUint16(bytes, 8) / 1000.0;
+  var prevTengMax = readUint16(bytes, 10) / 1000.0;
+  var prevSuperCap = readUint16(bytes, 12) / 1000.0;
+  var prevEndMarker = bytes[14];
+
+  // Current session
   var battery  = readUint16(bytes, 15) / 1000.0;
   var lat      = readInt32(bytes, 17)  / 1e7;
   var lon      = readInt32(bytes, 21)  / 1e7;
@@ -68,8 +79,11 @@ function decodeFY25(bytes) {
 
   return {
     version: "FY25", crcOk: crcOk,
-    tengCurr: tengCurr, battery: battery,
-    lat: lat, lon: lon, gpsTime: gpsTime,
+    tengCurr: tengCurr,
+    prev1stRB: prev1stRB, prev2ndRB: prev2ndRB, prevGPS: prevGPS,
+    prevTengAvg: prevTengAvg, prevTengMax: prevTengMax,
+    prevSuperCap: prevSuperCap, prevEndMarker: prevEndMarker,
+    battery: battery, lat: lat, lon: lon, gpsTime: gpsTime,
     pressure: pressure, intTemp: intTemp,
     humidity: humidity, sst: sst, superCap: superCap
   };

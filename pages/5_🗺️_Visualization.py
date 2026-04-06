@@ -92,9 +92,8 @@ def render_visualization():
         device_ids = tabs
         dev_col = "Device Tab"
 
-    # Sidebar: device selection by actual Device ID
-    st.sidebar.subheader("Data Source")
-    selected_devices = st.sidebar.multiselect("Devices", device_ids, default=device_ids)
+    # Device selection — in main content area for visibility
+    selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
 
     if not selected_devices:
         st.info("Select at least one device.")
@@ -109,11 +108,11 @@ def render_visualization():
     # Parse time column
     time_col = _find_time_col(all_df)
 
-    # Sidebar: date range filter
+    # Date range filter
     if time_col:
         valid = all_df[time_col].dropna()
         if not valid.empty:
-            c1, c2 = st.sidebar.columns(2)
+            c1, c2 = st.columns(2)
             with c1:
                 start = st.date_input("Start", value=valid.min().date(), key="viz_start")
             with c2:

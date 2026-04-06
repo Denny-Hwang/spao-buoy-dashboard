@@ -55,8 +55,38 @@ def decode_fy25(data: bytes) -> dict:
     raw = _uint16(data, 0)
     fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, round(raw / 1000.0, 3), "mA"))
 
-    # Previous Session (2-14)
-    fields.append(_field("Previous Session", _hex_slice(data, 2, 13), None, _hex_slice(data, 2, 13), "hex"))
+    # --- Previous Session (bytes 2-14, 13 bytes) ---
+    # Decoded into individual fields, matching FY26(v3) structure
+
+    # Prev 1st RB Time (2-3) — satellite TX time for first RockBLOCK attempt
+    raw = _uint16(data, 2)
+    fields.append(_field("Prev 1st RB Time", _hex_slice(data, 2, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev 2nd RB Time (4-5) — satellite TX time for second RockBLOCK attempt
+    raw = _uint16(data, 4)
+    fields.append(_field("Prev 2nd RB Time", _hex_slice(data, 4, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev GPS Time (6-7) — GPS acquisition time from previous session
+    raw = _uint16(data, 6)
+    fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev TENG Avg (8-9) — FY25 uses µA encoding, /1000 for mA
+    raw = _uint16(data, 8)
+    fields.append(_field("Prev TENG Avg", _hex_slice(data, 8, 2), raw, round(raw / 1000.0, 3), "mA"))
+
+    # Prev TENG Max (10-11) — FY25 uses µA encoding, /1000 for mA
+    raw = _uint16(data, 10)
+    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 1000.0, 3), "mA"))
+
+    # Prev SuperCap (12-13) — FY25 reports previous SuperCap voltage
+    raw = _uint16(data, 12)
+    fields.append(_field("Prev SuperCap", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
+
+    # Prev End Marker (14) — 1 byte in FY25 (vs 2 bytes in FY26)
+    raw = data[14]
+    fields.append(_field("Prev End Marker", _hex_slice(data, 14, 1), raw, raw, ""))
+
+    # --- Current Session ---
 
     # Battery (15-16)
     raw = _uint16(data, 15)
