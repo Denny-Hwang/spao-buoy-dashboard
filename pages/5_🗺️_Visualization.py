@@ -124,6 +124,17 @@ def render_visualization():
         st.info("No data in selected date range.")
         return
 
+    # Style tabs to be larger and more prominent
+    st.markdown("""
+    <style>
+    div[data-baseweb="tab-list"] button {
+        font-size: 1.15rem;
+        font-weight: 700;
+        padding: 0.6rem 1.2rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Tabs
     tab_map, tab_sensor, tab_custom = st.tabs(["Drift Map", "Sensor Plots", "Custom Plot"])
 
@@ -143,7 +154,7 @@ def render_visualization():
                 device_col=dev_col,
                 highlight_latest=True,
             )
-            st_folium(m, width=None, height=600, returned_objects=[])
+            st_folium(m, width=None, height=800, returned_objects=[])
         else:
             st.warning("No GPS columns found in the data.")
 
