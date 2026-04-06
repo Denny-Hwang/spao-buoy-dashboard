@@ -49,13 +49,13 @@ def _int32(data: bytes, offset: int) -> int:
 def decode_fy25(data: bytes) -> dict:
     """Decode FY25 38-byte packet.
 
-    Previous Session layout (bytes 2-14, 13 bytes) — from Arduino V3 EEPROM:
+    Previous Session layout (bytes 2-14, 13 bytes) — mirrors FY26(v3) structure:
       2-3:   Prev 1st RB Time  (uint16, ×100ms, /10→s)
       4-5:   Prev 2nd RB Time  (uint16, ×100ms, /10→s)
       6-7:   Prev GPS Time     (uint16, ×100ms, /10→s)
-      8-9:   Prev TENG Current (uint16, mA×1000, /1000→mA)
-      10-11: Prev Battery      (uint16, mV, /1000→V)
-      12-13: Prev SuperCap     (uint16, mV, /1000→V)
+      8-9:   Prev TENG Current (uint16, µA, /1000→mA)
+      10-11: Prev TENG Max     (uint16, µA, /1000→mA)
+      12-13: Prev Battery      (uint16, mV, /1000→V)
       14:    Prev End Marker   (uint8)
     """
     fields = []
@@ -79,17 +79,17 @@ def decode_fy25(data: bytes) -> dict:
     raw = _uint16(data, 6)
     fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
 
-    # Prev TENG Current (8-9) — FY25 uses µA encoding (mA×1000)
+    # Prev TENG Current (8-9) — FY25 uses µA encoding (÷1000→mA)
     raw = _uint16(data, 8)
     fields.append(_field("Prev TENG Current", _hex_slice(data, 8, 2), raw, round(raw / 1000.0, 3), "mA"))
 
-    # Prev Battery (10-11) — previous session battery voltage in mV
+    # Prev TENG Max (10-11) — peak TENG current, same µA encoding (÷1000→mA)
     raw = _uint16(data, 10)
-    fields.append(_field("Prev Battery", _hex_slice(data, 10, 2), raw, round(raw / 1000, 3), "V"))
+    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 1000.0, 3), "mA"))
 
-    # Prev SuperCap (12-13) — previous session super-capacitor voltage in mV
+    # Prev Battery (12-13) — previous session battery voltage in mV (÷1000→V)
     raw = _uint16(data, 12)
-    fields.append(_field("Prev SuperCap", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
+    fields.append(_field("Prev Battery", _hex_slice(data, 12, 2), raw, round(raw / 1000, 3), "V"))
 
     # Prev End Marker (14) — 1 byte in FY25
     raw = data[14]
