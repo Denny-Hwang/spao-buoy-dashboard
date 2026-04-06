@@ -222,20 +222,27 @@ def render_visualization():
                     plot_df["Dewpoint"] = (b * alpha) / (a - alpha)
 
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=plot_df[time_col], y=plot_df[hum_cols[0]],
-                        mode="lines+markers", name="Humidity (%RH)",
-                        line=dict(width=LINE_WIDTH, color=COLORS[0]),
-                        marker=dict(size=MARKER_SIZE),
-                        yaxis="y",
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=plot_df[time_col], y=plot_df["Dewpoint"],
-                        mode="lines+markers", name="Dewpoint (°C)",
-                        line=dict(width=LINE_WIDTH, color=COLORS[1]),
-                        marker=dict(size=MARKER_SIZE),
-                        yaxis="y2",
-                    ))
+                    devices = plot_df[dev_col].unique()
+                    for i, device in enumerate(devices):
+                        ddf = plot_df[plot_df[dev_col] == device]
+                        ci = i % len(COLORS)
+                        # Use a paired color: even index for humidity, odd for dewpoint
+                        hum_color = COLORS[ci * 2 % len(COLORS)]
+                        dew_color = COLORS[(ci * 2 + 1) % len(COLORS)]
+                        fig.add_trace(go.Scatter(
+                            x=ddf[time_col], y=ddf[hum_cols[0]],
+                            mode="lines+markers", name=f"Humidity – {device}",
+                            line=dict(width=LINE_WIDTH, color=hum_color),
+                            marker=dict(size=MARKER_SIZE),
+                            yaxis="y",
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=ddf[time_col], y=ddf["Dewpoint"],
+                            mode="lines+markers", name=f"Dewpoint – {device}",
+                            line=dict(width=LINE_WIDTH, color=dew_color, dash="dot"),
+                            marker=dict(size=MARKER_SIZE),
+                            yaxis="y2",
+                        ))
                     apply_plot_style(fig, title="Humidity & Dewpoint", x_title=time_col, y_title="Humidity (%RH)")
                     fig.update_layout(
                         yaxis2=dict(
