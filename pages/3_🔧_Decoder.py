@@ -12,7 +12,7 @@ from utils.decoders import auto_detect_and_decode, SAMPLE_DATA
 st.set_page_config(page_title="Decoder", page_icon="🔧", layout="wide")
 st.title("🔧 Packet Decoder")
 
-VERSIONS = ["Auto-detect", "FY25", "FY26(v3)", "FY26", "FY26+EC"]
+VERSIONS = ["Auto-detect", "V6.4", "V6.4+EC", "FY26", "FY26+EC", "FY26(v3)", "FY25"]
 
 # Version selector
 version = st.selectbox("Decoder Version", VERSIONS)
@@ -26,15 +26,20 @@ with tab_single:
     with col1:
         hex_input = st.text_input(
             "Hex String",
-            placeholder="Enter hex-encoded packet data...",
+            placeholder="Enter hex string (90 chars = 45B without EC, 98 chars = 49B with EC)",
         )
     with col2:
         st.write("")
         st.write("")
-        sample_key = list(SAMPLE_DATA.keys())[0]
-        if st.button("Load Sample"):
-            hex_input = SAMPLE_DATA[sample_key]
-            st.session_state["hex_input_val"] = hex_input
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("45B Sample"):
+                hex_input = SAMPLE_DATA["V6.4 (45B)"]
+                st.session_state["hex_input_val"] = hex_input
+        with btn_col2:
+            if st.button("49B Sample"):
+                hex_input = SAMPLE_DATA["V6.4+EC (49B)"]
+                st.session_state["hex_input_val"] = hex_input
 
     # Use session state for sample loading
     if "hex_input_val" in st.session_state and not hex_input:

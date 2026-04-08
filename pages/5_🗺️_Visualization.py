@@ -5,6 +5,7 @@ Page 5: Visualization — Drift maps and sensor plots with per-device filtering.
 import streamlit as st
 import pandas as pd
 import numpy as np
+from datetime import date
 
 st.set_page_config(page_title="Visualization", page_icon="🗺️", layout="wide")
 st.title("🗺️ Visualization")
@@ -108,15 +109,23 @@ def render_visualization():
     # Parse time column
     time_col = _find_time_col(all_df)
 
-    # Date range filter
+    # Date range filter — defaults to today
     if time_col:
         valid = all_df[time_col].dropna()
         if not valid.empty:
-            c1, c2 = st.columns(2)
+            today = date.today()
+            c1, c2, c3 = st.columns([2, 2, 1])
             with c1:
-                start = st.date_input("Start", value=valid.min().date(), key="viz_start")
+                start = st.date_input("Start", value=today, key="viz_start")
             with c2:
-                end = st.date_input("End", value=valid.max().date(), key="viz_end")
+                end = st.date_input("End", value=today, key="viz_end")
+            with c3:
+                st.write("")
+                st.write("")
+                if st.button("Today", key="viz_today"):
+                    st.session_state["viz_start"] = today
+                    st.session_state["viz_end"] = today
+                    st.rerun()
             mask = all_df[time_col].dt.date.between(start, end) | all_df[time_col].isna()
             all_df = all_df[mask]
 

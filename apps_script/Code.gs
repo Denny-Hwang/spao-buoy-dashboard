@@ -119,6 +119,67 @@ function decodeFY26v3(bytes) {
   };
 }
 
+/**
+ * Decode V6.4 45-byte packet.
+ * Changes from FY26: TENG Avg is best 1-min sliding window (scale /100),
+ * Prev TENG Avg/Max scale /100, added Prev Oper Time at offset 22,
+ * all subsequent fields shifted +2 bytes.
+ */
+function decodeV64(bytes) {
+  var tengCurr     = readUint16(bytes, 0) / 100.0;  // best 1-min window
+  var prev1stRB    = readUint16(bytes, 2) / 10.0;
+  var prev2ndRB    = readUint16(bytes, 4) / 10.0;
+  var prevGPS      = readUint16(bytes, 6) / 10.0;
+  var prevTengAvg  = readUint16(bytes, 8) / 100.0;
+  var prevTengMax  = readUint16(bytes, 10) / 100.0;
+  // Prev TENG Time (12-17): YY,MM,DD,HH,mm,SS
+  var prevTengTime = "20" + pad2(bytes[12]) + "-" + pad2(bytes[13]) + "-" + pad2(bytes[14]) +
+                     " " + pad2(bytes[15]) + ":" + pad2(bytes[16]) + ":" + pad2(bytes[17]);
+  var prevBatt     = readUint16(bytes, 18) / 1000.0;
+  var prevEnd      = readUint16(bytes, 20);
+  var prevOperTime = readUint16(bytes, 22);  // NEW in V6.4
+  var battery      = readUint16(bytes, 24) / 1000.0;
+  var lat          = readInt32(bytes, 26)  / 1e7;
+  var lon          = readInt32(bytes, 30)  / 1e7;
+  var gpsTime      = readUint16(bytes, 34) / 10.0;
+  var pressure     = readUint16(bytes, 36) / 1000.0;
+  var intTemp      = readInt16(bytes, 38)  / 100.0;
+  var humidity     = readUint16(bytes, 40) / 10.0;
+  var sst          = readInt16(bytes, 42)  / 1000.0;
+
+  var crcOk = (bytes[44] === crc8(bytes, 44));
+
+  return {
+    version: "V6.4", crcOk: crcOk,
+    tengCurr: tengCurr, prev1stRB: prev1stRB, prev2ndRB: prev2ndRB,
+    prevGPS: prevGPS, prevTengAvg: prevTengAvg, prevTengMax: prevTengMax,
+    prevTengTime: prevTengTime, prevBatt: prevBatt, prevEnd: prevEnd,
+    prevOperTime: prevOperTime,
+    battery: battery, lat: lat, lon: lon, gpsTime: gpsTime,
+    pressure: pressure, intTemp: intTemp, humidity: humidity, sst: sst
+  };
+}
+
+/**
+ * Decode V6.4+EC 49-byte packet (V6.4 + SSS/conductivity).
+ */
+function decodeV64EC(bytes) {
+  var base = decodeV64(bytes);  // reuse V6.4 field parsing (CRC will be wrong but we recalc)
+  var salinity     = readUint16(bytes, 44) / 1000.0;
+  var ec           = readUint16(bytes, 46) / 100.0;
+  var crcOk = (bytes[48] === crc8(bytes, 48));
+
+  base.version = "V6.4+EC";
+  base.crcOk = crcOk;
+  base.salinity = salinity;
+  base.ec = ec;
+  return base;
+}
+
+function pad2(n) {
+  return n < 10 ? "0" + n : "" + n;
+}
+
 // ── Webhook Entry Point ──────────────────────────────────────────
 
 function doPost(e) {
@@ -131,7 +192,11 @@ function doPost(e) {
     var len    = bytes.length;
     var result;
 
-    if (len === 38 || len === 41) {
+    if (len === 45) {
+      result = decodeV64(bytes);
+    } else if (len === 49) {
+      result = decodeV64EC(bytes);
+    } else if (len === 38 || len === 41) {
       result = decodeFY25(bytes);
     } else if (len === 37) {
       result = decodeFY26v3(bytes);
@@ -152,8 +217,10 @@ function doPost(e) {
       ws.appendRow([
         "Receive Time", "Transmit Time", "IMEI", "MOMSN",
         "Raw Hex", "Packet Ver", "Bytes", "CRC Valid",
-        "TENG Current Avg", "Battery", "GPS Latitude", "GPS Longitude",
-        "GPS Acq Time", "Pressure", "Internal Temp", "Humidity", "SST"
+        "TENG Current Avg", "Prev Oper Time", "Battery",
+        "GPS Latitude", "GPS Longitude", "GPS Acq Time",
+        "Pressure", "Internal Temp", "Humidity", "SST",
+        "Salinity", "EC Conductivity"
       ]);
     }
 
@@ -166,15 +233,18 @@ function doPost(e) {
       result.version,
       len,
       result.crcOk,
-      result.tengCurr || "",
-      result.battery  || "",
-      result.lat      || "",
-      result.lon      || "",
-      result.gpsTime  || "",
-      result.pressure || "",
-      result.intTemp  || "",
-      result.humidity || "",
-      result.sst      || ""
+      result.tengCurr    || "",
+      result.prevOperTime || "",
+      result.battery     || "",
+      result.lat         || "",
+      result.lon         || "",
+      result.gpsTime     || "",
+      result.pressure    || "",
+      result.intTemp     || "",
+      result.humidity    || "",
+      result.sst         || "",
+      result.salinity    || "",
+      result.ec          || ""
     ]);
 
     return ContentService.createTextOutput("OK");
