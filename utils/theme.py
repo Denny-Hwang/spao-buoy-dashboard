@@ -112,7 +112,7 @@ def inject_custom_css():
 
 
 def render_sidebar():
-    """Render sidebar header with PNNL / SPAO BUOY branding."""
+    """Render sidebar header with PNNL / SPAO BUOY branding at top, org info at bottom."""
     st.sidebar.markdown(
         '<div style="text-align:center; padding:8px 0;">'
         '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
@@ -122,11 +122,13 @@ def render_sidebar():
         '</div>',
         unsafe_allow_html=True,
     )
-    st.sidebar.divider()
     st.sidebar.markdown(
+        '<div style="position:fixed; bottom:0; left:0; width:var(--sidebar-width, 21rem); '
+        'padding:12px 0; border-top:1px solid #DEDEDE; background:#FFFFFF;">'
         '<p style="color:#5A5A5A; font-size:12px; text-align:center; margin:0;">'
         'Pacific Northwest National Laboratory<br>'
-        'DOE Water Power Technologies Office</p>',
+        'DOE Water Power Technologies Office</p>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
