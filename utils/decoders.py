@@ -413,6 +413,53 @@ def decode_fy26_ec(data: bytes) -> dict:
     }
 
 
+def _best_effort_decode(data: bytes, byte_len: int) -> dict:
+    """Attempt best-effort decoding for unknown packet lengths.
+
+    Tries the closest known format and marks the result as uncertain.
+    """
+    # FY26+EC range (>47 bytes) — likely FY26+EC with trailing bytes
+    if byte_len > 47:
+        try:
+            result = decode_fy26_ec(data[:47])
+            result["version"] = f"FY26+EC?({byte_len}B)"
+            result["byte_len"] = byte_len
+            result["warning"] = f"Decoded as FY26+EC (47B), ignoring {byte_len - 47} trailing byte(s)"
+            return result
+        except Exception:
+            pass
+
+    # FY26 range (44-46 bytes) — likely FY26 variant
+    if 44 <= byte_len <= 46:
+        try:
+            result = decode_fy26(data[:43])
+            result["version"] = f"FY26?({byte_len}B)"
+            result["byte_len"] = byte_len
+            result["warning"] = f"Decoded as FY26 (43B), ignoring {byte_len - 43} trailing byte(s)"
+            return result
+        except Exception:
+            pass
+
+    # FY25 range (39-40 bytes) — likely FY25 variant
+    if 39 <= byte_len <= 40:
+        try:
+            result = decode_fy25(data[:38])
+            result["version"] = f"FY25?({byte_len}B)"
+            result["byte_len"] = byte_len
+            result["warning"] = f"Decoded as FY25 (38B), ignoring {byte_len - 38} trailing byte(s)"
+            return result
+        except Exception:
+            pass
+
+    return {
+        "error": f"Unknown packet length: {byte_len} bytes. Expected 37, 38, 41, 43, or 47.",
+        "version": f"Unknown({byte_len}B)",
+        "byte_len": byte_len,
+        "crc_ok": False,
+        "fields": [],
+    }
+
+
 def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None) -> dict:
     """
     Decode a hex-encoded telemetry packet.
@@ -466,13 +513,8 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
     elif byte_len == 47:
         return decode_fy26_ec(data)
     else:
-        return {
-            "error": f"Unknown packet length: {byte_len} bytes. Expected 37, 38, 41, 43, or 47.",
-            "version": None,
-            "byte_len": byte_len,
-            "crc_ok": False,
-            "fields": [],
-        }
+        # Best-effort decoding for unknown lengths
+        return _best_effort_decode(data, byte_len)
 
 
 # Sample data for testing

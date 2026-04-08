@@ -15,7 +15,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-EXCLUDED_TABS = {"_errors", "Sheet1"}
+EXCLUDED_TABS = {"Sheet1"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
@@ -45,19 +45,39 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def detect_sheet_format(headers: list[str]) -> str:
-    """Detect if sheet contains raw RockBLOCK data or decoded webhook data."""
+    """Detect sheet data format based on header columns.
+
+    Returns one of:
+        ``rockblock_csv``   — Format A: RockBLOCK site CSV download
+        ``webhook_decoded`` — Format B-1: Apps Script decoded webhook data
+        ``webhook_errors``  — Format B-2: RB download / webhook error rows
+        ``unknown``         — Unrecognised layout
+    """
     if not headers:
         return "unknown"
+
+    header_set = {h.strip() for h in headers}
     first = headers[0].strip()
+
+    # Format A: RockBLOCK CSV export (first col = Date Time …)
     if first in ("Date Time (UTC)", "Date Time"):
-        return "rockblock_raw"
-    elif first in ("Receive Time",):
+        return "rockblock_csv"
+
+    # Format B-1: Webhook decoded by Apps Script (first col = Receive Time)
+    if first == "Receive Time":
         return "webhook_decoded"
-    else:
-        lower_headers = [h.lower().strip() for h in headers]
-        if "payload" in lower_headers or "hex" in lower_headers or "data" in lower_headers:
-            return "rockblock_raw"
-        return "unknown"
+
+    # Format B-2: New RB download / webhook error tab
+    #   Columns: Time | IMEI | MOMSN | Transmit Time | Raw Hex | Error
+    if "Raw Hex" in header_set and ("Error" in header_set or first == "Time"):
+        return "webhook_errors"
+
+    # Fallback: look for any known hex-payload column
+    lower_headers = [h.lower().strip() for h in headers]
+    if "payload" in lower_headers or "hex" in lower_headers or "data" in lower_headers:
+        return "rockblock_csv"
+
+    return "unknown"
 
 
 def _find_hex_column(headers: list[str]) -> str | None:
@@ -68,53 +88,82 @@ def _find_hex_column(headers: list[str]) -> str | None:
     return None
 
 
-def decode_rockblock_data(records: list[dict]) -> pd.DataFrame:
-    """Decode raw RockBLOCK export data into a standardized DataFrame."""
-    decoded_rows = []
-    headers = list(records[0].keys()) if records else []
-    hex_col = _find_hex_column(headers)
+def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
+    """Convert any sheet format into a unified DataFrame.
 
-    for row in records:
-        hex_payload = str(row.get(hex_col or "Payload", "")).strip()
-        if not hex_payload:
+    Always re-decodes from raw hex via ``auto_detect_and_decode`` so that
+    decoder updates apply to all data automatically.
+    """
+    rows: list[dict] = []
+    headers = list(records[0].keys()) if records else []
+
+    for record in records:
+        # ── Extract hex payload & metadata per format ──
+        if format_type == "rockblock_csv":
+            hex_col = _find_hex_column(headers)
+            hex_str = str(record.get(hex_col or "Payload", "")).strip()
+            timestamp = record.get("Date Time (UTC)", record.get("Date Time", ""))
+            device = str(record.get("Device", ""))
+            momsn = ""
+            transmit_time = ""
+        elif format_type == "webhook_decoded":
+            hex_str = str(record.get("Raw Hex", "")).strip()
+            timestamp = record.get("Receive Time", "")
+            device = str(record.get("IMEI", ""))
+            momsn = str(record.get("MOMSN", ""))
+            transmit_time = str(record.get("Transmit Time", ""))
+        elif format_type == "webhook_errors":
+            hex_str = str(record.get("Raw Hex", "")).strip()
+            timestamp = record.get("Time", "")
+            device = str(record.get("IMEI", ""))
+            momsn = str(record.get("MOMSN", ""))
+            transmit_time = str(record.get("Transmit Time", ""))
+        else:
             continue
 
-        result = auto_detect_and_decode(hex_payload)
+        if not hex_str:
+            continue
 
-        # Determine timestamp — try multiple column names
-        timestamp = row.get("Date Time (UTC)", row.get("Date Time", ""))
+        # ── Decode ──
+        result = auto_detect_and_decode(hex_str)
 
-        # Determine device identifier
-        device = str(row.get("Device", ""))
-
-        # Build decoded row with sensor data first, hex last
-        decoded_row = {
+        row: dict = {
             "Timestamp": timestamp,
             "Device": device,
+            "MOMSN": momsn,
             "Packet Ver": result.get("version", "Unknown") if result else "Unknown",
-            "Bytes": row.get("Length (Bytes)", len(hex_payload) // 2),
+            "Bytes": result.get("byte_len", len(hex_str) // 2) if result else len(hex_str) // 2,
             "CRC Valid": result.get("crc_ok", False) if result else False,
         }
 
-        # Add decoded sensor fields — use clean names (units shown in plots/axis labels)
+        if transmit_time:
+            row["Transmit Time"] = transmit_time
+
+        # Decoded sensor fields
         if result and result.get("fields"):
             for field in result["fields"]:
-                decoded_row[field["name"]] = field["value"]
+                row[field["name"]] = field["value"]
 
-        if "error" in result and result["error"]:
-            decoded_row["Decode Error"] = result["error"]
+        if result and result.get("error"):
+            row["Decode Error"] = result["error"]
 
-        # Raw hex at the end
-        decoded_row["Raw Hex"] = hex_payload
+        if result and result.get("warning"):
+            row["Warning"] = result["warning"]
 
-        decoded_rows.append(decoded_row)
+        # Preserve Notes column if present
+        if "Notes" in record and record["Notes"]:
+            row["Notes"] = record["Notes"]
 
-    if not decoded_rows:
+        # Raw hex last
+        row["Raw Hex"] = hex_str
+
+        rows.append(row)
+
+    if not rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(decoded_rows)
+    df = pd.DataFrame(rows)
 
-    # Parse timestamp column
     if "Timestamp" in df.columns:
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", format="mixed")
 
@@ -122,7 +171,11 @@ def decode_rockblock_data(records: list[dict]) -> pd.DataFrame:
 
 
 def read_and_decode_sheet(worksheet) -> pd.DataFrame:
-    """Read sheet data, auto-detecting format and decoding if needed."""
+    """Read sheet data, auto-detecting format and decoding if needed.
+
+    All recognised formats are re-decoded from raw hex so that decoder
+    improvements apply retroactively to historical data.
+    """
     records = worksheet.get_all_records()
     if not records:
         return pd.DataFrame()
@@ -130,23 +183,20 @@ def read_and_decode_sheet(worksheet) -> pd.DataFrame:
     headers = list(records[0].keys())
     fmt = detect_sheet_format(headers)
 
-    if fmt == "rockblock_raw":
-        return decode_rockblock_data(records)
-    elif fmt == "webhook_decoded":
-        df = pd.DataFrame(records)
-        for col in df.columns:
-            if col != "Notes":
-                df[col] = pd.to_numeric(df[col], errors="ignore")
-        return reorder_columns(df)
-    else:
-        hex_col = _find_hex_column(headers)
-        if hex_col:
-            return decode_rockblock_data(records)
-        df = pd.DataFrame(records)
-        for col in df.columns:
-            if col != "Notes":
-                df[col] = pd.to_numeric(df[col], errors="ignore")
-        return reorder_columns(df)
+    if fmt in ("rockblock_csv", "webhook_decoded", "webhook_errors"):
+        return normalize_sheet_data(records, fmt)
+
+    # Unknown format — try to find a hex column and decode as rockblock_csv
+    hex_col = _find_hex_column(headers)
+    if hex_col:
+        return normalize_sheet_data(records, "rockblock_csv")
+
+    # Completely unknown — return as-is
+    df = pd.DataFrame(records)
+    for col in df.columns:
+        if col != "Notes":
+            df[col] = pd.to_numeric(df[col], errors="ignore")
+    return reorder_columns(df)
 
 
 @st.cache_data(ttl=60)
