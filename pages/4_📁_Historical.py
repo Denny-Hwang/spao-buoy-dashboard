@@ -33,7 +33,14 @@ def render_historical():
         st.cache_data.clear()
         st.rerun()
 
-    tabs = list_device_tabs()
+    # Optional: external Google Sheet ID
+    ext_id = st.text_input(
+        "Google Sheet ID (leave blank for default)",
+        placeholder="e.g. 1qJWka_8kDlLBRFXtUtYWLl3S026KxP3tRCmlC_N6dkU",
+    )
+    sheet_id = ext_id.strip() if ext_id and ext_id.strip() else None  # None → use default
+
+    tabs = list_device_tabs(sheet_id) if sheet_id else list_device_tabs()
     if not tabs:
         st.info("No device tabs found.")
         return
@@ -41,7 +48,7 @@ def render_historical():
     # Load all tabs
     frames = []
     for tab in tabs:
-        df = get_device_data(tab)
+        df = get_device_data(tab, sheet_id) if sheet_id else get_device_data(tab)
         if not df.empty:
             df = df.copy()
             df["Device Tab"] = tab

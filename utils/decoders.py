@@ -1,5 +1,5 @@
 """
-SPAO Buoy packet decoders for FY25, FY26(v3), FY26, FY26+EC, V6.4, and V6.4+EC telemetry formats.
+SPAO Buoy packet decoders for FY25, FY26(v3), FY26(v5), FY26(v5)+EC, FY26(v6.4), and FY26(v6.4)+EC telemetry formats.
 
 Packet Structure Definition (V6.4):
   - Added Prev Oper Time (2 bytes, uint16, sec) at offset 22 (shifts all subsequent fields +2)
@@ -313,7 +313,7 @@ def decode_fy26(data: bytes) -> dict:
     crc_ok = crc_byte == crc_calc
 
     return {
-        "version": "FY26",
+        "version": "FY26(v5)",
         "byte_len": 43,
         "crc_ok": crc_ok,
         "fields": fields,
@@ -412,7 +412,7 @@ def decode_fy26_ec(data: bytes) -> dict:
     crc_ok = crc_byte == crc_calc
 
     return {
-        "version": "FY26+EC",
+        "version": "FY26(v5)+EC",
         "byte_len": 47,
         "crc_ok": crc_ok,
         "fields": fields,
@@ -513,7 +513,7 @@ def decode_v64(data: bytes) -> dict:
     crc_ok = crc_byte == crc_calc
 
     return {
-        "version": "V6.4",
+        "version": "FY26(v6.4)",
         "byte_len": 45,
         "crc_ok": crc_ok,
         "fields": fields,
@@ -615,7 +615,7 @@ def decode_v64_ec(data: bytes) -> dict:
     crc_ok = crc_byte == crc_calc
 
     return {
-        "version": "V6.4+EC",
+        "version": "FY26(v6.4)+EC",
         "byte_len": 49,
         "crc_ok": crc_ok,
         "fields": fields,
@@ -649,10 +649,10 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
         version_map = {
             "FY25": (38, decode_fy25),
             "FY26(v3)": (37, decode_fy26_v3),
-            "FY26": (43, decode_fy26),
-            "FY26+EC": (47, decode_fy26_ec),
-            "V6.4": (45, decode_v64),
-            "V6.4+EC": (49, decode_v64_ec),
+            "FY26(v5)": (43, decode_fy26),
+            "FY26(v5)+EC": (47, decode_fy26_ec),
+            "FY26(v6.4)": (45, decode_v64),
+            "FY26(v6.4)+EC": (49, decode_v64_ec),
         }
         if force_version not in version_map:
             return {"error": f"Unknown version: {force_version}", "version": None, "byte_len": byte_len, "crc_ok": False, "fields": []}
@@ -681,9 +681,19 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
     elif byte_len == 49:
         return decode_v64_ec(data)
     else:
+        # Best-effort: try closest known decoder for unknown lengths
+        if byte_len > 49:
+            try:
+                result = decode_v64_ec(data[:49])
+                result["version"] = f"FY26(v6.4)+EC?({byte_len}B)"
+                result["byte_len"] = byte_len
+                result["warning"] = f"Decoded as FY26(v6.4)+EC (49B), ignoring {byte_len - 49} trailing byte(s)"
+                return result
+            except Exception:
+                pass
         return {
             "error": f"Unknown packet length: {byte_len} bytes. Expected 37, 38, 41, 43, 45, 47, or 49.",
-            "version": None,
+            "version": f"Unknown({byte_len}B)",
             "byte_len": byte_len,
             "crc_ok": False,
             "fields": [],
@@ -692,8 +702,8 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
 
 # Sample data for testing
 SAMPLE_DATA = {
-    "V6.4 (45B)": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d48c",
-    "V6.4+EC (49B)": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d486c414b452",
+    "FY26(v6.4) 45B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d48c",
+    "FY26(v6.4)+EC 49B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d486c414b452",
     "FY26(v3)": "0002037300000272000200040f5800000f580000000000000000027239a9047c017a0a1441",
     "FY25": "000200000000000000000000000000" + "0f58" + "00000000" + "00000000" + "0000" + "39a9" + "047c" + "017a" + "0a14" + "0000" + "00",
 }

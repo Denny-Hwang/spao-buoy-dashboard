@@ -184,6 +184,9 @@ def render_visualization():
                 ("Internal Temp", "°C", ["internal temp", "int temp"]),
                 ("Humidity", "%RH", ["humidity"]),
                 ("TENG Current Avg", "mA", ["teng current", "teng avg"]),
+                ("EC Conductivity", "mS/cm", ["ec conductivity"]),
+                ("Salinity", "PSS-78", ["salinity"]),
+                ("Prev Oper Time", "s", ["prev oper time"]),
                 ("SuperCap Voltage", "V", ["supercap"]),
             ]
 

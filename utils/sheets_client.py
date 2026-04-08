@@ -3,6 +3,8 @@ Google Sheets client for reading/writing SPAO buoy data via gspread.
 Supports both webhook-decoded data and raw RockBLOCK CSV exports.
 """
 
+import re
+
 import gspread
 import pandas as pd
 import streamlit as st
@@ -15,7 +17,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-EXCLUDED_TABS = {"Sheet1"}
+# Exclude default Google Sheets tabs ("Sheet1", "Sheet2", …) and the error log
+_DEFAULT_SHEET_RE = re.compile(r"^Sheet\d*$")
+EXCLUDED_TABS = {"_errors", "_devices"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
@@ -201,10 +205,18 @@ def read_and_decode_sheet(worksheet) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def list_device_tabs(sheet_id: str = SHEET_ID) -> list[str]:
-    """Return all worksheet tab names except excluded ones."""
+    """Return all worksheet tab names except excluded ones.
+
+    Filters out default Google Sheets names (Sheet1, Sheet2, …) and
+    any tabs in EXCLUDED_TABS.
+    """
     try:
         spreadsheet = _open_sheet(sheet_id)
-        return [ws.title for ws in spreadsheet.worksheets() if ws.title not in EXCLUDED_TABS]
+        return [
+            ws.title
+            for ws in spreadsheet.worksheets()
+            if ws.title not in EXCLUDED_TABS and not _DEFAULT_SHEET_RE.match(ws.title)
+        ]
     except Exception as e:
         st.error(f"Failed to list device tabs: {e}")
         return []
@@ -264,6 +276,36 @@ def get_device_column(df: pd.DataFrame) -> str | None:
             if not vals.empty and vals.str.strip().ne("").any():
                 return col
     return None
+
+
+@st.cache_data(ttl=300)
+def get_device_nicknames(sheet_id: str = SHEET_ID) -> dict[str, str]:
+    """Load IMEI/Serial → Nickname mapping from the optional ``_devices`` tab.
+
+    Expected columns: ``Device ID``, ``Nickname`` (others are ignored).
+    Returns ``{device_id: nickname}`` or empty dict if the tab doesn't exist.
+    """
+    try:
+        spreadsheet = _open_sheet(sheet_id)
+        ws = spreadsheet.worksheet("_devices")
+        records = ws.get_all_records()
+        mapping: dict[str, str] = {}
+        for row in records:
+            did = str(row.get("Device ID", "")).strip()
+            nick = str(row.get("Nickname", "")).strip()
+            if did and nick:
+                mapping[did] = nick
+        return mapping
+    except gspread.exceptions.WorksheetNotFound:
+        return {}
+    except Exception:
+        return {}
+
+
+def format_device_label(device_id: str, nicknames: dict[str, str]) -> str:
+    """Return ``nickname (id)`` if a mapping exists, else just the id."""
+    nick = nicknames.get(device_id, "")
+    return f"{nick} ({device_id})" if nick else device_id
 
 
 def update_note(tab_name: str, row_index: int, note_text: str, sheet_id: str = SHEET_ID) -> bool:

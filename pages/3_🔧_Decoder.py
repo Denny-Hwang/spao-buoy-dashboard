@@ -12,7 +12,7 @@ from utils.decoders import auto_detect_and_decode, SAMPLE_DATA
 st.set_page_config(page_title="Decoder", page_icon="🔧", layout="wide")
 st.title("🔧 Packet Decoder")
 
-VERSIONS = ["Auto-detect", "V6.4", "V6.4+EC", "FY26", "FY26+EC", "FY26(v3)", "FY25"]
+VERSIONS = ["Auto-detect", "FY26(v6.4)+EC", "FY26(v6.4)", "FY26(v5)+EC", "FY26(v5)", "FY26(v3)", "FY25"]
 
 # Version selector
 version = st.selectbox("Decoder Version", VERSIONS)
@@ -34,11 +34,11 @@ with tab_single:
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button("45B Sample"):
-                hex_input = SAMPLE_DATA["V6.4 (45B)"]
+                hex_input = SAMPLE_DATA["FY26(v6.4) 45B"]
                 st.session_state["hex_input_val"] = hex_input
         with btn_col2:
             if st.button("49B Sample"):
-                hex_input = SAMPLE_DATA["V6.4+EC (49B)"]
+                hex_input = SAMPLE_DATA["FY26(v6.4)+EC 49B"]
                 st.session_state["hex_input_val"] = hex_input
 
     # Use session state for sample loading
