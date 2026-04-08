@@ -67,6 +67,13 @@ def render_live_data():
     # Track which tab this device belongs to (for note saving)
     selected_tab = df["Device Tab"].iloc[0] if "Device Tab" in df.columns and not df.empty else selected
 
+    # Detect device change and reset date filters so defaults update
+    if st.session_state.get("live_selected_device") != selected:
+        st.session_state.live_selected_device = selected
+        for k in ("live_start", "live_end"):
+            st.session_state.pop(k, None)
+        st.rerun()
+
     # Auto-refresh
     auto_refresh = st.checkbox("Auto-refresh (every 5 min)")
     if auto_refresh:
