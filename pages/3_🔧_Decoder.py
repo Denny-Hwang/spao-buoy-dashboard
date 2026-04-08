@@ -12,7 +12,7 @@ from utils.decoders import auto_detect_and_decode, SAMPLE_DATA
 st.set_page_config(page_title="Decoder", page_icon="🔧", layout="wide")
 st.title("🔧 Packet Decoder")
 
-VERSIONS = ["Auto-detect", "FY25", "FY26(v3)", "FY26", "FY26+EC"]
+VERSIONS = ["Auto-detect", "V6.4", "V6.4+EC", "FY26", "FY26+EC", "FY26(v3)", "FY25"]
 
 # Version selector
 version = st.selectbox("Decoder Version", VERSIONS)
@@ -26,15 +26,20 @@ with tab_single:
     with col1:
         hex_input = st.text_input(
             "Hex String",
-            placeholder="Enter hex-encoded packet data...",
+            placeholder="Enter hex string (90 chars = 45B without EC, 98 chars = 49B with EC)",
         )
     with col2:
         st.write("")
         st.write("")
-        sample_key = list(SAMPLE_DATA.keys())[0]
-        if st.button("Load Sample"):
-            hex_input = SAMPLE_DATA[sample_key]
-            st.session_state["hex_input_val"] = hex_input
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("45B Sample"):
+                hex_input = SAMPLE_DATA["V6.4 (45B)"]
+                st.session_state["hex_input_val"] = hex_input
+        with btn_col2:
+            if st.button("49B Sample"):
+                hex_input = SAMPLE_DATA["V6.4+EC (49B)"]
+                st.session_state["hex_input_val"] = hex_input
 
     # Use session state for sample loading
     if "hex_input_val" in st.session_state and not hex_input:
@@ -47,6 +52,9 @@ with tab_single:
             if "error" in result and result["error"]:
                 st.error(result["error"])
             else:
+                if result.get("warning"):
+                    st.warning(result["warning"])
+
                 # Header info
                 col_a, col_b, col_c = st.columns(3)
                 col_a.metric("Version", result["version"])
@@ -82,7 +90,7 @@ with tab_single:
 with tab_batch:
     st.markdown(
         "Upload a CSV file with hex-encoded packets. "
-        "Supported formats: RockBLOCK export (`Payload` column), or custom CSV (`data`/`hex` column)."
+        "Supported formats: RockBLOCK CSV (`Payload`), RB download (`Raw Hex`), or custom CSV (`data`/`hex`)."
     )
 
     uploaded = st.file_uploader("Upload CSV", type=["csv"])
@@ -107,11 +115,18 @@ with tab_batch:
                 hex_col = st.selectbox("Select column containing hex data", input_df.columns)
 
             if hex_col:
-                # Detect RockBLOCK format for additional metadata
-                is_rockblock = "Device" in input_df.columns or "Date Time (UTC)" in input_df.columns
+                # Detect format for metadata extraction
+                cols = set(input_df.columns)
+                is_rockblock_csv = "Device" in cols or "Date Time (UTC)" in cols
+                is_rb_download = "IMEI" in cols and "Time" in cols
 
-                st.write(f"Found **{len(input_df)}** rows — hex column: `{hex_col}`"
-                         + (" (RockBLOCK format detected)" if is_rockblock else ""))
+                fmt_label = ""
+                if is_rockblock_csv:
+                    fmt_label = " (RockBLOCK CSV format)"
+                elif is_rb_download:
+                    fmt_label = " (RB download format)"
+
+                st.write(f"Found **{len(input_df)}** rows — hex column: `{hex_col}`{fmt_label}")
 
                 if st.button("Decode All", type="primary"):
                     results = []
@@ -126,13 +141,19 @@ with tab_batch:
                             "CRC": result.get("crc_ok", False),
                         }
 
-                        # Include RockBLOCK metadata if available
-                        if is_rockblock:
+                        # Include metadata based on detected format
+                        if is_rockblock_csv:
                             row_data["Timestamp"] = row.get("Date Time (UTC)", row.get("Date Time", ""))
                             row_data["Device"] = row.get("Device", "")
+                        elif is_rb_download:
+                            row_data["Timestamp"] = row.get("Time", "")
+                            row_data["Device"] = row.get("IMEI", "")
+                            row_data["MOMSN"] = row.get("MOMSN", "")
 
                         if "error" in result and result["error"]:
                             row_data["Error"] = result["error"]
+                        if result.get("warning"):
+                            row_data["Warning"] = result["warning"]
                         for field in result.get("fields", []):
                             row_data[field["name"]] = field["value"]
                         results.append(row_data)
