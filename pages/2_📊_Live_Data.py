@@ -84,7 +84,7 @@ def render_live_data():
 
     st.write(f"**{len(df)} records** for device `{selected}`")
 
-    # Date range filter — defaults to today
+    # Date range filter — defaults to device's first/last date
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if time_cols:
         time_col = time_cols[0]
@@ -92,19 +92,13 @@ def render_live_data():
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             valid_times = df[time_col].dropna()
             if not valid_times.empty:
-                today = date.today()
-                col1, col2, col3 = st.columns([2, 2, 1])
+                data_min = valid_times.min().date()
+                data_max = valid_times.max().date()
+                col1, col2 = st.columns(2)
                 with col1:
-                    start_date = st.date_input("Start date", value=today, key="live_start")
+                    start_date = st.date_input("Start date", value=data_min, key="live_start")
                 with col2:
-                    end_date = st.date_input("End date", value=today, key="live_end")
-                with col3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Today", key="live_today"):
-                        st.session_state["live_start"] = today
-                        st.session_state["live_end"] = today
-                        st.rerun()
+                    end_date = st.date_input("End date", value=data_max, key="live_end")
                 mask = (df[time_col].dt.date >= start_date) & (df[time_col].dt.date <= end_date)
                 df = df[mask]
         except Exception:
@@ -121,12 +115,16 @@ def render_live_data():
     # Reorder columns (hex last)
     df = reorder_columns(df)
 
+    # Drop columns that are entirely empty/NaN for this device
+    non_empty = [c for c in df.columns if c in ("_sheet_row", "Notes") or df[c].notna().any()]
+    df = df[non_empty]
+
     # Ensure Notes column exists
     if "Notes" not in df.columns:
         df["Notes"] = ""
 
-    # Columns to display (hide internal _sheet_row)
-    display_cols = [c for c in df.columns if c != "_sheet_row"]
+    # Columns to display (hide internal _sheet_row and Device Tab)
+    display_cols = [c for c in df.columns if c not in ("_sheet_row", "Device Tab")]
 
     # Inline editable data table
     st.subheader("Data")

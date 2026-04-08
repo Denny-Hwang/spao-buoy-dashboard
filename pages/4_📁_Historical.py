@@ -78,7 +78,7 @@ def render_historical():
         st.info("No data for selected devices.")
         return
 
-    # Date range filter — defaults to today
+    # Date range filter — defaults to device's first/last date
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if time_cols:
         time_col = time_cols[0]
@@ -86,26 +86,22 @@ def render_historical():
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             valid_times = df[time_col].dropna()
             if not valid_times.empty:
-                today = date.today()
-                c1, c2, c3 = st.columns([2, 2, 1])
+                data_min = valid_times.min().date()
+                data_max = valid_times.max().date()
+                c1, c2 = st.columns(2)
                 with c1:
-                    start = st.date_input("Start", value=today, key="hist_start")
+                    start = st.date_input("Start", value=data_min, key="hist_start")
                 with c2:
-                    end = st.date_input("End", value=today, key="hist_end")
-                with c3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Today", key="hist_today"):
-                        st.session_state["hist_start"] = today
-                        st.session_state["hist_end"] = today
-                        st.rerun()
+                    end = st.date_input("End", value=data_max, key="hist_end")
                 mask = (df[time_col].dt.date >= start) & (df[time_col].dt.date <= end)
                 df = df[mask]
         except Exception:
             pass
 
-    # Reorder columns (hex last)
+    # Reorder columns (hex last), then drop all-empty columns
     df = reorder_columns(df)
+    non_empty = [c for c in df.columns if df[c].notna().any()]
+    df = df[non_empty]
 
     # Summary stats
     st.subheader("Summary")

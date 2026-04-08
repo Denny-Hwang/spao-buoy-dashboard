@@ -109,23 +109,17 @@ def render_visualization():
     # Parse time column
     time_col = _find_time_col(all_df)
 
-    # Date range filter — defaults to today
+    # Date range filter — defaults to data's first/last date
     if time_col:
         valid = all_df[time_col].dropna()
         if not valid.empty:
-            today = date.today()
-            c1, c2, c3 = st.columns([2, 2, 1])
+            data_min = valid.min().date()
+            data_max = valid.max().date()
+            c1, c2 = st.columns(2)
             with c1:
-                start = st.date_input("Start", value=today, key="viz_start")
+                start = st.date_input("Start", value=data_min, key="viz_start")
             with c2:
-                end = st.date_input("End", value=today, key="viz_end")
-            with c3:
-                st.write("")
-                st.write("")
-                if st.button("Today", key="viz_today"):
-                    st.session_state["viz_start"] = today
-                    st.session_state["viz_end"] = today
-                    st.rerun()
+                end = st.date_input("End", value=data_max, key="viz_end")
             mask = all_df[time_col].dt.date.between(start, end) | all_df[time_col].isna()
             all_df = all_df[mask]
 
