@@ -5,7 +5,7 @@ Page 4: Archive — Past deployment data viewer with summary statistics.
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from datetime import date
+from datetime import date, time, datetime
 
 st.set_page_config(page_title="Archive", page_icon="🔬", layout="wide")
 
@@ -50,14 +50,7 @@ def render_archive():
         st.cache_data.clear()
         st.rerun()
 
-    # Optional: external Google Sheet ID
-    ext_id = st.text_input(
-        "Google Sheet ID (leave blank for default)",
-        placeholder="e.g. 1qJWka_8kDlLBRFXtUtYWLl3S026KxP3tRCmlC_N6dkU",
-    )
-    sheet_id = ext_id.strip() if ext_id and ext_id.strip() else None
-
-    tabs = list_device_tabs(sheet_id) if sheet_id else list_device_tabs()
+    tabs = list_device_tabs()
     if not tabs:
         render_empty_state("No device tabs found", "Waiting for first transmission from RockBLOCK webhook.")
         return
@@ -65,7 +58,7 @@ def render_archive():
     # Load all tabs
     frames = []
     for tab in tabs:
-        df = get_device_data(tab, sheet_id) if sheet_id else get_device_data(tab)
+        df = get_device_data(tab)
         if not df.empty:
             df = df.copy()
             df["Device Tab"] = tab
@@ -103,14 +96,20 @@ def render_archive():
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             valid_times = df[time_col].dropna()
             if not valid_times.empty:
-                data_min = valid_times.min().date()
-                data_max = valid_times.max().date()
-                c1, c2 = st.columns(2)
+                data_min = valid_times.min()
+                data_max = valid_times.max()
+                c1, c2, c3, c4 = st.columns(4)
                 with c1:
-                    start = st.date_input("Start", value=data_min, key="hist_start")
+                    start = st.date_input("Start", value=data_min.date(), key="hist_start")
                 with c2:
-                    end = st.date_input("End", value=data_max, key="hist_end")
-                mask = (df[time_col].dt.date >= start) & (df[time_col].dt.date <= end)
+                    start_t = st.time_input("Start time", value=time(0, 0), key="hist_start_time")
+                with c3:
+                    end = st.date_input("End", value=data_max.date(), key="hist_end")
+                with c4:
+                    end_t = st.time_input("End time", value=time(23, 59), key="hist_end_time")
+                start_dt = datetime.combine(start, start_t)
+                end_dt = datetime.combine(end, end_t)
+                mask = (df[time_col] >= pd.Timestamp(start_dt)) & (df[time_col] <= pd.Timestamp(end_dt))
                 df = df[mask]
         except Exception:
             pass

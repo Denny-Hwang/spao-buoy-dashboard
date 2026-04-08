@@ -4,7 +4,7 @@ Page 1: Overview — Device overview with KPI cards, mini map, and activity feed
 
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, time, datetime
 
 st.set_page_config(page_title="Overview", page_icon="🔬", layout="wide")
 
@@ -131,14 +131,20 @@ def render_overview():
             # Date range filter
             valid_times = all_data["_parsed_time"].dropna()
             if not valid_times.empty:
-                data_min = valid_times.min().date()
-                data_max = valid_times.max().date()
-                col_d1, col_d2 = st.columns(2)
+                data_min = valid_times.min()
+                data_max = valid_times.max()
+                col_d1, col_d2, col_d3, col_d4 = st.columns(4)
                 with col_d1:
-                    start_date = st.date_input("Start date", value=data_min, key="dash_start")
+                    start_date = st.date_input("Start date", value=data_min.date(), key="dash_start")
                 with col_d2:
-                    end_date = st.date_input("End date", value=data_max, key="dash_end")
-                mask = (all_data["_parsed_time"].dt.date >= start_date) & (all_data["_parsed_time"].dt.date <= end_date)
+                    start_time = st.time_input("Start time", value=time(0, 0), key="dash_start_time")
+                with col_d3:
+                    end_date = st.date_input("End date", value=data_max.date(), key="dash_end")
+                with col_d4:
+                    end_time = st.time_input("End time", value=time(23, 59), key="dash_end_time")
+                start_dt = datetime.combine(start_date, start_time)
+                end_dt = datetime.combine(end_date, end_time)
+                mask = (all_data["_parsed_time"] >= pd.Timestamp(start_dt)) & (all_data["_parsed_time"] <= pd.Timestamp(end_dt))
                 all_data = all_data[mask]
         except Exception:
             pass
@@ -174,7 +180,7 @@ def render_overview():
         unsafe_allow_html=True,
     )
     if "_parsed_time" in all_data.columns:
-        recent = all_data.dropna(subset=["_parsed_time"]).sort_values("_parsed_time", ascending=False).head(10)
+        recent = all_data.dropna(subset=["_parsed_time"]).sort_values("_parsed_time", ascending=False).head(3)
         for _, row in recent.iterrows():
             ts = row["_parsed_time"]
             delta = pd.Timestamp.now() - ts
