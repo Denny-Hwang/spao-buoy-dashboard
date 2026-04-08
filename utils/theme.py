@@ -122,17 +122,15 @@ def inject_custom_css():
 
 def render_sidebar():
     """Render sidebar header with logo and PNNL / SPAO BUOY branding."""
-    logo_bytes = get_logo_bytes()
-    _, center_col, _ = st.sidebar.columns([1, 3, 1])
-    with center_col:
-        st.image(logo_bytes, use_container_width=True)
     st.sidebar.markdown(
-        '<div style="text-align:center; margin-top:-8px; margin-bottom:8px;">'
-        '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
-        'letter-spacing:3px;">PNNL</p>'
-        '<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
-        'letter-spacing:1px;">SPAO BUOY</h2>'
-        '</div>',
+        f'<div style="text-align:center; padding:8px 0;">'
+        f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
+        f'style="height:80px; margin-bottom:4px;">'
+        f'<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
+        f'letter-spacing:3px;">PNNL</p>'
+        f'<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
+        f'letter-spacing:1px;">SPAO BUOY</h2>'
+        f'</div>',
         unsafe_allow_html=True,
     )
     st.sidebar.divider()
@@ -148,11 +146,14 @@ def render_sidebar():
 
 def render_header():
     """Render the global SPAO Buoy header with PNNL branding."""
-    logo_bytes = get_logo_bytes()
     col1, col2 = st.columns([1, 5])
 
     with col1:
-        st.image(logo_bytes, width=80)
+        st.markdown(
+            f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
+            f'style="height:72px; vertical-align:middle;">',
+            unsafe_allow_html=True,
+        )
 
     with col2:
         st.markdown(
