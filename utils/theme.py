@@ -4,7 +4,6 @@ Color tokens based on Pacific Northwest National Laboratory brand standards.
 """
 
 import streamlit as st
-import base64
 
 # === Primary Palette ===
 PNNL_NAVY = "#00263A"           # Deep navy (primary brand)
@@ -70,23 +69,6 @@ def battery_color(voltage: float) -> str:
         return DANGER
 
 
-# SPAO Project Logo (JPEG, base64-encoded)
-SPAO_LOGO_BASE64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAGwAbgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3+iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKx7/wAV+HdLyL/XdNtmHVZbpFb8ic0AbFFcJd/GTwDZ5D+IIpGHaGGSTP4quP1rHn/aB8EQk7G1Gf8A6522P/QiKAPU6K8dk/aO8JMcSaZrSfSKI/8AtSr9v+0B4HmI8yTUIP8ArpbZ/wDQSaAPZ6K4e0+MPhG9wI/EUCEdia2Rv03A13Fhrulangas9VsLhB1aG4Rx+YNAG1RRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAVFPNFDAQW8yQQRDc8srhVUepJ4FePeJvj/oWnyG08PW02s3ZO1XAMcWfYkbm/AcetS6b4B+MXxH/AHuranJoGly/wZNtkf7qjMjf8COK6aOGqVXaCuYVK0Kb952Oa8TfH/QtPkNp4etZtZuydquAY4s+xI3N+A59a5ey+E3xU+I9w+o+K9QfSbRjlbdMZx7RjCJ9Tlvwr2/wAJ/CXwl4PVHtNOW5vV/wCXy7xJJ+B+6P8AgIA967qplXhD4FcqNCc/iehy/gv4V+FvBCRy2Fj9ovlHN7cYeU/QdF/4CAa7iiiuBycnds7UklZBRRRSGFFFFABRRRQBxXxZZl+GN+wJGLqA8H/bFedfEj4j6h4J+H2iWOiOI9V1ezgLXGAfITyly2D3Yjj0BJ9K9c8eWV1qHgfVbOytpbi4lhwkcSFmJ3DoB14rzjw/8FNag8P2txrXiSaa8ubVY5bS2BMNu20ZXPRznrzj618lnOKp0XCE2lzXt306n0eV4edVTnBN8tr/APBI/CHwJtL3w9Z33i3V726uruBJjZ27mKKHcAdu4YZ+OuSBn0rbj+AXgSKQOdOupQO0t3Ic/luA/SvTFUIoVQAoGAB2paivjKtR3lJmtPC04K0YoqaZpdjpFhFY6daw2trENscUKBVUfQVboornNwooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAK5nxN8QPDHhJWGratCk4HFtGfMlP/AAFcn6nArrq+fPid8H9Y1vxFP4k0W/SS4mVFa1u5CqEKoXCOAcHAHDAj2oA6C7+Md5rcrWvg7w3dahO52o8ybFJ9cD5m/ACqP8AZ3xv8W/8fOrL/Z9u/wDCgFtgf7qjczfjmul+FGi+I/DPgGHTtf1dru7WRzHBFuMNqhP3EJMZJJJ65AwBya7ygDyCD4CaTqMy3XizWdV168U7lM8xWJD7IOv4mvQ9G8LaD4dh8rSNIsrFcYJhgVWb6tjLH6mteigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA//Z"  # noqa: E501
-
-LOGO_HTML_TEMPLATE = '<img src="{src}" alt="SPAO Logo" style="height:{height}px; vertical-align:middle;">'
-
-
-def render_logo(height: int = 48) -> str:
-    """Return HTML img tag for the SPAO logo at the given height in pixels."""
-    return LOGO_HTML_TEMPLATE.format(src=SPAO_LOGO_BASE64, height=height)
-
-
-def get_logo_bytes() -> bytes:
-    """Decode the base64 logo and return raw JPEG bytes."""
-    raw_b64 = SPAO_LOGO_BASE64.split(",", 1)[1]
-    return base64.b64decode(raw_b64)
-
-
 def inject_custom_css():
     """Inject custom CSS for improved font sizes across sidebar and tabs."""
     st.markdown("""
@@ -121,16 +103,14 @@ def inject_custom_css():
 
 
 def render_sidebar():
-    """Render sidebar header with logo and PNNL / SPAO BUOY branding."""
+    """Render sidebar header with PNNL / SPAO BUOY branding."""
     st.sidebar.markdown(
-        f'<div style="text-align:center; padding:8px 0;">'
-        f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
-        f'style="height:80px; margin-bottom:4px;">'
-        f'<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
-        f'letter-spacing:3px;">PNNL</p>'
-        f'<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
-        f'letter-spacing:1px;">SPAO BUOY</h2>'
-        f'</div>',
+        '<div style="text-align:center; padding:8px 0;">'
+        '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
+        'letter-spacing:3px;">PNNL</p>'
+        '<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
+        'letter-spacing:1px;">SPAO BUOY</h2>'
+        '</div>',
         unsafe_allow_html=True,
     )
     st.sidebar.divider()
@@ -146,25 +126,15 @@ def render_sidebar():
 
 def render_header():
     """Render the global SPAO Buoy header with PNNL branding."""
-    col1, col2 = st.columns([1, 5])
-
-    with col1:
-        st.markdown(
-            f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
-            f'style="height:72px; vertical-align:middle;">',
-            unsafe_allow_html=True,
-        )
-
-    with col2:
-        st.markdown(
-            '<div style="padding-top:8px;">'
-            '<h2 style="margin:0; color:#003E6B; font-weight:600;">'
-            'SPAO Buoy Monitoring System</h2>'
-            '<p style="margin:0; color:#5A5A5A; font-size:14px;">'
-            'Self-Powered Arctic Ocean &middot; Pacific Northwest National Laboratory</p>'
-            '</div>',
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        '<div style="padding-top:8px;">'
+        '<h2 style="margin:0; color:#003E6B; font-weight:600;">'
+        'SPAO Buoy Monitoring System</h2>'
+        '<p style="margin:0; color:#5A5A5A; font-size:14px;">'
+        'Self-Powered Arctic Ocean &middot; Pacific Northwest National Laboratory</p>'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         '<hr style="margin:8px 0 24px 0; border:none; '

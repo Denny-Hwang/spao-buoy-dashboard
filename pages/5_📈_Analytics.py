@@ -5,7 +5,7 @@ Page 5: Analytics — Drift maps, sensor plots, and custom charts with PNNL bran
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, time, datetime
 
 st.set_page_config(page_title="Analytics", page_icon="🔬", layout="wide")
 
@@ -136,14 +136,20 @@ def render_analytics():
     if time_col:
         valid = all_df[time_col].dropna()
         if not valid.empty:
-            data_min = valid.min().date()
-            data_max = valid.max().date()
-            c1, c2 = st.columns(2)
+            data_min = valid.min()
+            data_max = valid.max()
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
-                start = st.date_input("Start", value=data_min, key="viz_start")
+                start = st.date_input("Start", value=data_min.date(), key="viz_start")
             with c2:
-                end = st.date_input("End", value=data_max, key="viz_end")
-            mask = all_df[time_col].dt.date.between(start, end) | all_df[time_col].isna()
+                start_t = st.time_input("Start time", value=time(0, 0), key="viz_start_time")
+            with c3:
+                end = st.date_input("End", value=data_max.date(), key="viz_end")
+            with c4:
+                end_t = st.time_input("End time", value=time(23, 59), key="viz_end_time")
+            start_dt = datetime.combine(start, start_t)
+            end_dt = datetime.combine(end, end_t)
+            mask = (all_df[time_col] >= pd.Timestamp(start_dt)) & (all_df[time_col] <= pd.Timestamp(end_dt)) | all_df[time_col].isna()
             all_df = all_df[mask]
 
     if all_df.empty:

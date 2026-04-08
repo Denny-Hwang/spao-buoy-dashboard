@@ -5,7 +5,7 @@ Page 2: Live Telemetry — Real-time data table with battery/CRC badges and inli
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from datetime import date
+from datetime import date, time, datetime
 
 st.set_page_config(page_title="Live Telemetry", page_icon="🔬", layout="wide")
 
@@ -93,7 +93,7 @@ def render_live_telemetry():
     # Detect device change and reset date filters
     if st.session_state.get("live_selected_device") != selected:
         st.session_state.live_selected_device = selected
-        for k in ("live_start", "live_end"):
+        for k in ("live_start", "live_end", "live_start_time", "live_end_time"):
             st.session_state.pop(k, None)
         st.rerun()
 
@@ -121,14 +121,20 @@ def render_live_telemetry():
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             valid_times = df[time_col].dropna()
             if not valid_times.empty:
-                data_min = valid_times.min().date()
-                data_max = valid_times.max().date()
-                col1, col2 = st.columns(2)
+                data_min = valid_times.min()
+                data_max = valid_times.max()
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    start_date = st.date_input("Start date", value=data_min, key="live_start")
+                    start_date = st.date_input("Start date", value=data_min.date(), key="live_start")
                 with col2:
-                    end_date = st.date_input("End date", value=data_max, key="live_end")
-                mask = (df[time_col].dt.date >= start_date) & (df[time_col].dt.date <= end_date)
+                    start_time = st.time_input("Start time", value=time(0, 0), key="live_start_time")
+                with col3:
+                    end_date = st.date_input("End date", value=data_max.date(), key="live_end")
+                with col4:
+                    end_time = st.time_input("End time", value=time(23, 59), key="live_end_time")
+                start_dt = datetime.combine(start_date, start_time)
+                end_dt = datetime.combine(end_date, end_time)
+                mask = (df[time_col] >= pd.Timestamp(start_dt)) & (df[time_col] <= pd.Timestamp(end_dt))
                 df = df[mask]
         except Exception:
             pass
