@@ -1,5 +1,5 @@
 """
-Page 4: Historical Data — Past deployment data viewer.
+Page 4: Archive — Past deployment data viewer with summary statistics.
 """
 
 import streamlit as st
@@ -7,8 +7,14 @@ import pandas as pd
 from io import BytesIO
 from datetime import date
 
-st.set_page_config(page_title="Historical Data", page_icon="📁", layout="wide")
-st.title("📁 Historical Data")
+st.set_page_config(page_title="Archive", page_icon="🔬", layout="wide")
+
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_kpi_card,
+    render_empty_state, render_error, PNNL_BLUE,
+)
+
+render_header()
 
 _errors = []
 try:
@@ -22,14 +28,22 @@ except Exception as e:
 SHEETS_AVAILABLE = len(_errors) == 0
 
 
-def render_historical():
+def render_archive():
     if not SHEETS_AVAILABLE:
-        st.error("Failed to load required modules:")
+        render_error(
+            "Cannot connect to data source",
+            "Failed to load the Google Sheets client. Check your Streamlit Secrets configuration.",
+        )
         for err in _errors:
             st.error(err)
         return
 
-    if st.button("🔄 Refresh Data"):
+    st.markdown(
+        f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">Archive</h1>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
@@ -38,11 +52,11 @@ def render_historical():
         "Google Sheet ID (leave blank for default)",
         placeholder="e.g. 1qJWka_8kDlLBRFXtUtYWLl3S026KxP3tRCmlC_N6dkU",
     )
-    sheet_id = ext_id.strip() if ext_id and ext_id.strip() else None  # None → use default
+    sheet_id = ext_id.strip() if ext_id and ext_id.strip() else None
 
     tabs = list_device_tabs(sheet_id) if sheet_id else list_device_tabs()
     if not tabs:
-        st.info("No device tabs found.")
+        render_empty_state("No device tabs found", "Waiting for first transmission from RockBLOCK webhook.")
         return
 
     # Load all tabs
@@ -55,7 +69,7 @@ def render_historical():
             frames.append(df)
 
     if not frames:
-        st.info("No data available.")
+        render_empty_state("No data available", "Device tabs exist but contain no decoded data.")
         return
 
     all_data = pd.concat(frames, ignore_index=True)
@@ -75,10 +89,10 @@ def render_historical():
 
     df = all_data[all_data[dev_col].isin(selected_devices)].copy()
     if df.empty:
-        st.info("No data for selected devices.")
+        render_empty_state("No data for selected devices", "Try selecting different devices.")
         return
 
-    # Date range filter — defaults to device's first/last date
+    # Date range filter
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if time_cols:
         time_col = time_cols[0]
@@ -98,31 +112,35 @@ def render_historical():
         except Exception:
             pass
 
-    # Reorder columns (hex last), then drop all-empty columns
+    # Reorder columns, drop all-empty columns
     df = reorder_columns(df)
     non_empty = [c for c in df.columns if df[c].notna().any()]
     df = df[non_empty]
 
-    # Summary stats
-    st.subheader("Summary")
-    stat_cols = st.columns(4)
-    stat_cols[0].metric("Total Records", len(df))
+    # Summary stats with KPI cards
+    st.markdown(f'<h3 style="color:{PNNL_BLUE};">Summary</h3>', unsafe_allow_html=True)
+    stat1, stat2, stat3, stat4 = st.columns(4)
+    with stat1:
+        render_kpi_card("Total Records", f"{len(df):,}")
 
     if time_cols:
         try:
             date_range = f"{df[time_cols[0]].min().strftime('%Y-%m-%d')} to {df[time_cols[0]].max().strftime('%Y-%m-%d')}"
-            stat_cols[1].metric("Date Range", date_range)
+            with stat2:
+                render_kpi_card("Date Range", date_range)
         except Exception:
             pass
 
     batt_cols = [c for c in df.columns if "battery" in c.lower()]
     if batt_cols:
         batt = pd.to_numeric(df[batt_cols[0]], errors="coerce")
-        stat_cols[2].metric("Battery Min/Max", f"{batt.min():.3f} / {batt.max():.3f} V")
-        stat_cols[3].metric("Battery Avg", f"{batt.mean():.3f} V")
+        with stat3:
+            render_kpi_card("Battery Min/Max", f"{batt.min():.3f} / {batt.max():.3f} V")
+        with stat4:
+            render_kpi_card("Battery Avg", f"{batt.mean():.3f} V")
 
     # Data table
-    st.subheader("Data")
+    st.markdown(f'<h3 style="color:{PNNL_BLUE};">Data</h3>', unsafe_allow_html=True)
     st.dataframe(df, use_container_width=True, height=500, hide_index=True)
 
     # CSV export
@@ -136,7 +154,5 @@ def render_historical():
     )
 
 
-render_historical()
-
-st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")
+render_archive()
+render_footer()

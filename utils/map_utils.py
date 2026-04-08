@@ -6,7 +6,7 @@ import folium
 import numpy as np
 import pandas as pd
 
-from utils.plot_utils import COLORS
+from utils.theme import DEVICE_PALETTE as COLORS
 
 BASEMAPS = {
     "Satellite": {

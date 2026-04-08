@@ -1,5 +1,5 @@
 """
-Page 5: Visualization — Drift maps and sensor plots with per-device filtering.
+Page 5: Analytics — Drift maps, sensor plots, and custom charts with PNNL branding.
 """
 
 import streamlit as st
@@ -7,8 +7,14 @@ import pandas as pd
 import numpy as np
 from datetime import date
 
-st.set_page_config(page_title="Visualization", page_icon="🗺️", layout="wide")
-st.title("🗺️ Visualization")
+st.set_page_config(page_title="Analytics", page_icon="🔬", layout="wide")
+
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_empty_state, render_error,
+    PNNL_BLUE, SENSOR_COLORS, DEVICE_PALETTE,
+)
+
+render_header()
 
 _errors = []
 try:
@@ -26,7 +32,7 @@ except Exception as e:
 
 try:
     from utils.plot_utils import (
-        make_time_series, make_scatter, make_3d_scatter, apply_plot_style, COLORS,
+        make_time_series, make_scatter, make_3d_scatter, apply_plot_style,
         LINE_WIDTH, MARKER_SIZE, PLOT_HEIGHT,
     )
 except Exception as e:
@@ -55,20 +61,36 @@ def _find_time_col(df: pd.DataFrame) -> str | None:
     return time_col
 
 
-def render_visualization():
+def _get_sensor_color(sensor_name: str, fallback_idx: int = 0) -> str:
+    """Get color from SENSOR_COLORS map, with fallback to DEVICE_PALETTE."""
+    for key, color in SENSOR_COLORS.items():
+        if key.lower() in sensor_name.lower():
+            return color
+    return DEVICE_PALETTE[fallback_idx % len(DEVICE_PALETTE)]
+
+
+def render_analytics():
     if not SHEETS_AVAILABLE:
-        st.error("Failed to load required modules:")
+        render_error(
+            "Cannot load required modules",
+            "Some dependencies failed to load. Check your installation.",
+        )
         for err in _errors:
             st.error(err)
         return
 
-    if st.button("🔄 Refresh Data"):
+    st.markdown(
+        f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">Analytics</h1>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     tabs = list_device_tabs()
     if not tabs:
-        st.info("No device tabs found.")
+        render_empty_state("No device tabs found", "Waiting for first transmission from RockBLOCK webhook.")
         return
 
     # Load all tabs
@@ -81,7 +103,7 @@ def render_visualization():
             frames.append(df)
 
     if not frames:
-        st.info("No data available.")
+        render_empty_state("No data available", "Device tabs exist but contain no decoded data.")
         return
 
     all_df = pd.concat(frames, ignore_index=True)
@@ -93,23 +115,21 @@ def render_visualization():
         device_ids = tabs
         dev_col = "Device Tab"
 
-    # Device selection — in main content area for visibility
     selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
 
     if not selected_devices:
         st.info("Select at least one device.")
         return
 
-    # Filter by selected devices
     all_df = all_df[all_df[dev_col].isin(selected_devices)].copy()
     if all_df.empty:
-        st.info("No data for selected devices.")
+        render_empty_state("No data for selected devices", "Try selecting different devices.")
         return
 
     # Parse time column
     time_col = _find_time_col(all_df)
 
-    # Date range filter — defaults to data's first/last date
+    # Date range filter
     if time_col:
         valid = all_df[time_col].dropna()
         if not valid.empty:
@@ -124,42 +144,89 @@ def render_visualization():
             all_df = all_df[mask]
 
     if all_df.empty:
-        st.info("No data in selected date range.")
+        render_empty_state("No data in selected range", "Adjust the date range to see data.")
         return
-
-    # Style tabs to be larger and more prominent
-    st.markdown("""
-    <style>
-    div[data-baseweb="tab-list"] button {
-        font-size: 1.15rem;
-        font-weight: 700;
-        padding: 0.6rem 1.2rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
     # Tabs
     tab_map, tab_sensor, tab_custom = st.tabs(["Drift Map", "Sensor Plots", "Custom Plot"])
 
-    # --- Drift Map ---
+    # --- Drift Map with split layout ---
     with tab_map:
-        basemap = st.selectbox("Basemap", list(BASEMAPS.keys()), index=0)
+        map_col, detail_col = st.columns([3, 2])
 
-        lat_cols = [c for c in all_df.columns if "latitude" in c.lower()]
-        lon_cols = [c for c in all_df.columns if "longitude" in c.lower()]
+        with map_col:
+            basemap = st.selectbox("Basemap", list(BASEMAPS.keys()), index=0)
 
-        if lat_cols and lon_cols:
-            m = build_drift_map(
-                all_df,
-                basemap=basemap,
-                lat_col=lat_cols[0],
-                lon_col=lon_cols[0],
-                device_col=dev_col,
-                highlight_latest=True,
-            )
-            st_folium(m, width=None, height=800, returned_objects=[])
-        else:
-            st.warning("No GPS columns found in the data.")
+            lat_cols = [c for c in all_df.columns if "latitude" in c.lower()]
+            lon_cols = [c for c in all_df.columns if "longitude" in c.lower()]
+
+            if lat_cols and lon_cols:
+                m = build_drift_map(
+                    all_df,
+                    basemap=basemap,
+                    lat_col=lat_cols[0],
+                    lon_col=lon_cols[0],
+                    device_col=dev_col,
+                    highlight_latest=True,
+                )
+                st_folium(m, width=None, height=600, returned_objects=[])
+            else:
+                st.warning("No GPS columns found in the data.")
+
+        with detail_col:
+            st.markdown(f'<h4 style="color:{PNNL_BLUE};">Latest Position Details</h4>', unsafe_allow_html=True)
+
+            if lat_cols and lon_cols:
+                for i, device in enumerate(selected_devices):
+                    device_df = all_df[all_df[dev_col] == device]
+                    if device_df.empty:
+                        continue
+
+                    lat_c = lat_cols[0]
+                    lon_c = lon_cols[0]
+                    valid_gps = device_df[
+                        device_df[lat_c].notna() & device_df[lon_c].notna()
+                        & ((device_df[lat_c] != 0) | (device_df[lon_c] != 0))
+                    ]
+                    if valid_gps.empty:
+                        continue
+
+                    last = valid_gps.iloc[-1]
+                    dev_color = DEVICE_PALETTE[i % len(DEVICE_PALETTE)]
+
+                    st.markdown(
+                        f'<div style="border-left:4px solid {dev_color}; padding:8px 12px; margin-bottom:12px;">'
+                        f'<strong style="color:{PNNL_BLUE};">{device}</strong><br>'
+                        f'<span style="font-size:13px; color:#5A5A5A;">'
+                        f'Lat: {last[lat_c]:.4f}, Lon: {last[lon_c]:.4f}',
+                        unsafe_allow_html=True,
+                    )
+
+                    # Show key sensor values
+                    detail_parts = []
+                    batt_cols = [c for c in device_df.columns if "battery" in c.lower()]
+                    if batt_cols:
+                        bv = pd.to_numeric(last.get(batt_cols[0], None), errors="coerce")
+                        if pd.notna(bv):
+                            detail_parts.append(f"Battery: {bv:.3f}V")
+                    sst_cols = [c for c in device_df.columns if "sst" in c.lower()]
+                    if sst_cols:
+                        sv = pd.to_numeric(last.get(sst_cols[0], None), errors="coerce")
+                        if pd.notna(sv):
+                            detail_parts.append(f"SST: {sv:.2f}&deg;C")
+                    pres_cols = [c for c in device_df.columns if "pressure" in c.lower()]
+                    if pres_cols:
+                        pv = pd.to_numeric(last.get(pres_cols[0], None), errors="coerce")
+                        if pd.notna(pv):
+                            detail_parts.append(f"Pressure: {pv:.1f} psi")
+
+                    if detail_parts:
+                        st.markdown(
+                            '<span style="font-size:13px; color:#5A5A5A;">'
+                            + " &middot; ".join(detail_parts) + '</span>',
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Sensor Plots ---
     with tab_sensor:
@@ -168,14 +235,13 @@ def render_visualization():
         else:
             plot_base = all_df.dropna(subset=[time_col])
 
-            # Exclude "Prev" columns — only plot current-session sensors
             _skip = {"Device", "Device Tab", "IMEI"}
 
             sensor_configs = [
                 ("Battery", "V", ["battery"]),
-                ("SST", "°C", ["sst", "ocean temp"]),
+                ("SST", "\u00b0C", ["sst", "ocean temp"]),
                 ("Pressure", "psi", ["pressure"]),
-                ("Internal Temp", "°C", ["internal temp", "int temp"]),
+                ("Internal Temp", "\u00b0C", ["internal temp", "int temp"]),
                 ("Humidity", "%RH", ["humidity"]),
                 ("TENG Current Avg", "mA", ["teng current", "teng avg"]),
                 ("EC Conductivity", "mS/cm", ["ec conductivity"]),
@@ -196,26 +262,36 @@ def render_visualization():
                     plot_df = plot_df.dropna(subset=[y_col])
                     if plot_df.empty:
                         continue
-                    fig = make_time_series(
-                        plot_df,
-                        x_col=time_col,
-                        y_col=y_col,
-                        title=title,
-                        y_unit=unit,
-                        color_col=dev_col,
-                    )
+
+                    # Use SENSOR_COLORS for consistent coloring
+                    fig = go.Figure()
+                    devices = plot_df[dev_col].unique()
+                    for di, device in enumerate(devices):
+                        ddf = plot_df[plot_df[dev_col] == device]
+                        color = DEVICE_PALETTE[di % len(DEVICE_PALETTE)]
+                        fig.add_trace(go.Scatter(
+                            x=ddf[time_col], y=ddf[y_col],
+                            mode="lines+markers",
+                            name=str(device),
+                            line=dict(width=LINE_WIDTH, color=color),
+                            marker=dict(size=MARKER_SIZE),
+                        ))
+
+                    sensor_color = _get_sensor_color(title)
+                    y_label = f"{y_col} ({unit})" if unit else y_col
+                    apply_plot_style(fig, title=title, x_title=time_col, y_title=y_label)
                     st.plotly_chart(fig, use_container_width=True)
 
             pres_cols = [c for c in plot_base.columns if "pressure" in c.lower()]
             sst_cols = [c for c in plot_base.columns if "sst" in c.lower() or "ocean temp" in c.lower()]
             if pres_cols and sst_cols:
-                st.subheader("Pressure vs SST")
+                st.markdown(f'<h4 style="color:{PNNL_BLUE};">Pressure vs SST</h4>', unsafe_allow_html=True)
                 fig = make_scatter(
                     plot_base,
                     x_col=sst_cols[0],
                     y_col=pres_cols[0],
                     title="Pressure vs SST",
-                    x_unit="°C",
+                    x_unit="\u00b0C",
                     y_unit="psi",
                     color_col=dev_col,
                     trendline=True,
@@ -225,7 +301,7 @@ def render_visualization():
             hum_cols = [c for c in plot_base.columns if "humidity" in c.lower()]
             temp_cols = [c for c in plot_base.columns if "internal temp" in c.lower()]
             if hum_cols and temp_cols:
-                st.subheader("Humidity & Dewpoint")
+                st.markdown(f'<h4 style="color:{PNNL_BLUE};">Humidity & Dewpoint</h4>', unsafe_allow_html=True)
                 plot_df = plot_base.copy()
                 plot_df[hum_cols[0]] = pd.to_numeric(plot_df[hum_cols[0]], errors="coerce")
                 plot_df[temp_cols[0]] = pd.to_numeric(plot_df[temp_cols[0]], errors="coerce")
@@ -242,20 +318,18 @@ def render_visualization():
                     devices = plot_df[dev_col].unique()
                     for i, device in enumerate(devices):
                         ddf = plot_df[plot_df[dev_col] == device]
-                        ci = i % len(COLORS)
-                        # Use a paired color: even index for humidity, odd for dewpoint
-                        hum_color = COLORS[ci * 2 % len(COLORS)]
-                        dew_color = COLORS[(ci * 2 + 1) % len(COLORS)]
+                        hum_color = DEVICE_PALETTE[i % len(DEVICE_PALETTE)]
+                        dew_color = DEVICE_PALETTE[(i + 1) % len(DEVICE_PALETTE)]
                         fig.add_trace(go.Scatter(
                             x=ddf[time_col], y=ddf[hum_cols[0]],
-                            mode="lines+markers", name=f"Humidity – {device}",
+                            mode="lines+markers", name=f"Humidity \u2013 {device}",
                             line=dict(width=LINE_WIDTH, color=hum_color),
                             marker=dict(size=MARKER_SIZE),
                             yaxis="y",
                         ))
                         fig.add_trace(go.Scatter(
                             x=ddf[time_col], y=ddf["Dewpoint"],
-                            mode="lines+markers", name=f"Dewpoint – {device}",
+                            mode="lines+markers", name=f"Dewpoint \u2013 {device}",
                             line=dict(width=LINE_WIDTH, color=dew_color, dash="dot"),
                             marker=dict(size=MARKER_SIZE),
                             yaxis="y2",
@@ -263,7 +337,7 @@ def render_visualization():
                     apply_plot_style(fig, title="Humidity & Dewpoint", x_title=time_col, y_title="Humidity (%RH)")
                     fig.update_layout(
                         yaxis2=dict(
-                            title="Dewpoint (°C)",
+                            title="Dewpoint (\u00b0C)",
                             overlaying="y",
                             side="right",
                             showgrid=False,
@@ -318,7 +392,5 @@ def render_visualization():
                         st.plotly_chart(fig, use_container_width=True)
 
 
-render_visualization()
-
-st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")
+render_analytics()
+render_footer()
