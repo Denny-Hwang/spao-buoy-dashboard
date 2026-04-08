@@ -100,15 +100,12 @@ def inject_custom_css():
     }
 
     /* Move sidebar branding above navigation */
-    section[data-testid="stSidebar"] > div:first-child > div:first-child {
-        display: flex;
-        flex-direction: column;
-    }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] {
-        order: 2 !important;
+    section[data-testid="stSidebar"] div:has(> [data-testid="stSidebarUserContent"]) {
+        display: flex !important;
+        flex-direction: column !important;
     }
     section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
-        order: 1 !important;
+        order: -1 !important;
     }
     </style>
     """, unsafe_allow_html=True)
