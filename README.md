@@ -1,25 +1,15 @@
 # SPAO Buoy Dashboard
 
-Streamlit web application for monitoring **SPAO (Self-Powered Arctic Ocean)** buoy telemetry. Reads satellite data from Google Sheets, decodes hex-encoded packets, and provides interactive visualization.
+Real-time monitoring system for **SPAO (Self-Powered Arctic Ocean)** buoy deployments.  
+Reads satellite telemetry from Google Sheets, decodes hex-encoded packets, and provides interactive visualization.
 
-## Features
+> Developed at **Pacific Northwest National Laboratory (PNNL)**
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** | Device status cards, battery levels, satellite trajectory map with latest position |
-| **Live Data** | Real-time data table with date filtering, inline notes editing, CSV export |
-| **Decoder** | Hex packet decoder — single input or batch CSV upload (RockBLOCK format supported) |
-| **Historical** | Multi-device data browser with summary statistics and date filtering |
-| **Visualization** | Drift trajectory maps and interactive sensor time-series plots, per-device filtering |
+---
 
-### Supported Data Formats
+## Quick Start
 
-- **RockBLOCK CSV exports** — Raw hex payloads pasted directly into Google Sheets
-- **Webhook-decoded data** — Pre-decoded rows from the Apps Script webhook
-
-## Setup
-
-### 1. Install
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/Denny-Hwang/spao-buoy-dashboard.git
@@ -27,11 +17,9 @@ cd spao-buoy-dashboard
 pip install -r requirements.txt
 ```
 
-### 2. Configure Google Sheets Access
+### 2. Set Up Google Sheets Credentials
 
-1. Create a GCP service account with **Google Sheets API** enabled
-2. Share the target spreadsheet with the service account email as **Editor**
-3. Create `.streamlit/secrets.toml`:
+Create `.streamlit/secrets.toml` with your GCP service account key:
 
 ```toml
 [gcp_service_account]
@@ -47,7 +35,7 @@ auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
 client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/..."
 ```
 
-For Streamlit Community Cloud, add the same content under **Settings > Secrets**.
+> **Prerequisites:** A GCP service account with the Google Sheets API enabled, and the target spreadsheet shared with the service account email as **Editor**. See [docs/setup-guide.md](docs/setup-guide.md) for step-by-step instructions.
 
 ### 3. Run
 
@@ -55,8 +43,112 @@ For Streamlit Community Cloud, add the same content under **Settings > Secrets**
 streamlit run app.py
 ```
 
+The app opens at `http://localhost:8501`. Select a page from the sidebar to start.
+
+---
+
+## Features
+
+| Page | What it does |
+|------|-------------|
+| **Dashboard** | Device status cards (battery, GPS, message count) and satellite trajectory map |
+| **Live Data** | Real-time data table with date filtering, inline notes editing, CSV export |
+| **Decoder** | Hex packet decoder — single input or batch CSV upload (RockBLOCK format) |
+| **Historical** | Multi-device data browser with summary statistics |
+| **Visualization** | Drift trajectory maps, time-series sensor plots, and custom 3D scatter |
+
+### Supported Hardware
+
+Six telemetry packet versions are auto-detected by byte length:
+
+| Version | Bytes | Key Difference |
+|---------|-------|----------------|
+| FY25 | 38 | Bering Sea deployment, supercapacitor fields |
+| FY26 (v3) | 37 | Simplified previous-session fields |
+| FY26 (v5) | 43 | Extended sensor set |
+| FY26 (v5) + EC | 47 | Adds electrical conductivity & salinity |
+| FY26 (v6.4) | 45 | Adds Prev Oper Time, TENG scale change |
+| FY26 (v6.4) + EC | 49 | v6.4 + conductivity & salinity |
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Streamlit App                        │
+│                                                         │
+│  app.py (Home)                                          │
+│  pages/                                                 │
+│    ├─ Dashboard    ── status cards, trajectory map      │
+│    ├─ Live Data    ── data table, notes editing         │
+│    ├─ Decoder      ── hex packet decoder                │
+│    ├─ Historical   ── past deployment browser           │
+│    └─ Visualization── drift maps, sensor plots          │
+│                                                         │
+│  utils/                                                 │
+│    ├─ sheets_client.py ── Google Sheets read/write      │
+│    ├─ decoders.py      ── packet decode (6 versions)    │
+│    ├─ map_utils.py     ── Folium map builder            │
+│    └─ plot_utils.py    ── Plotly chart styling           │
+└──────────────────┬──────────────────────────────────────┘
+                   │ Google Sheets API
+                   ▼
+┌──────────────────────────────────┐
+│         Google Sheets            │
+│  (per-IMEI tabs, auto-decoded)  │
+└──────────────────┬───────────────┘
+                   ▲
+                   │ RockBLOCK webhook POST
+┌──────────────────┴───────────────┐
+│    Google Apps Script Webhook    │
+│    (apps_script/Code.gs)         │
+│    — receives satellite data     │
+│    — decodes & appends to sheet  │
+└──────────────────────────────────┘
+```
+
+**Key points:**
+
+- **No backend server or database** — Streamlit handles both UI and logic; Google Sheets is the sole data store.
+- **Data flows in two ways:** the Apps Script webhook writes decoded telemetry into Google Sheets, and the Streamlit app reads it for display and analysis.
+- **Packet decoding** is duplicated in both the webhook (Apps Script) and the dashboard (Python) so data can be ingested from either raw or pre-decoded sources.
+- **Caching** — Streamlit's `@st.cache_data` with TTLs (60–300s) minimizes API calls.
+
+For detailed architecture documentation, see the [docs/](docs/) folder.
+
+---
+
+## Deployment
+
+### Streamlit Community Cloud (Recommended)
+
+1. Push your repo to GitHub
+2. Go to [streamlit.io/cloud](https://streamlit.io/cloud) and connect the repo
+3. Add the GCP service account JSON under **Settings > Secrets**
+4. Done — the app auto-deploys on every push to `main`
+
+### Local / Server
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py --server.port 8501
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/setup-guide.md](docs/setup-guide.md) | Full setup — GCP credentials, Google Sheets, Apps Script webhook |
+| [docs/architecture.md](docs/architecture.md) | Detailed architecture, data flow, and module reference |
+| [docs/packet-format.md](docs/packet-format.md) | Telemetry packet structure for all hardware versions |
+| [docs/google-sheets-format.md](docs/google-sheets-format.md) | Spreadsheet structure, supported data formats, tab naming |
+
+---
+
 ## Contact
 
-Sungjoo Hwang — sungjoo.hwang@pnnl.gov
-
+**Sungjoo Hwang** — sungjoo.hwang@pnnl.gov  
 Pacific Northwest National Laboratory
