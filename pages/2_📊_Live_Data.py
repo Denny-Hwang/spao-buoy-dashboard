@@ -112,7 +112,11 @@ def render_live_data():
 
     # Sort newest first
     if time_cols:
-        df = df.sort_index(ascending=False)
+        df = df.sort_values(time_col, ascending=False)
+
+    # Save original sheet row index (for note saving) then reset for stable editor state
+    df["_sheet_row"] = df.index
+    df = df.reset_index(drop=True)
 
     # Reorder columns (hex last)
     df = reorder_columns(df)
@@ -121,13 +125,16 @@ def render_live_data():
     if "Notes" not in df.columns:
         df["Notes"] = ""
 
+    # Columns to display (hide internal _sheet_row)
+    display_cols = [c for c in df.columns if c != "_sheet_row"]
+
     # Inline editable data table
     st.subheader("Data")
     edited_df = st.data_editor(
-        df,
+        df[display_cols],
         use_container_width=True,
         height=500,
-        disabled=[c for c in df.columns if c != "Notes"],
+        disabled=[c for c in display_cols if c != "Notes"],
         hide_index=True,
         key=f"editor_{selected}",
     )
@@ -140,11 +147,12 @@ def render_live_data():
         if changed_mask.any():
             if st.button("💾 Save Notes", type="primary"):
                 saved = 0
-                for idx in df.index[changed_mask]:
-                    pos = df.index.get_loc(idx)
-                    new_note = str(edited_notes.iloc[pos])
-                    if update_note(selected_tab, idx, new_note):
-                        saved += 1
+                for i in range(len(df)):
+                    if changed_mask[i]:
+                        sheet_row = int(df.iloc[i]["_sheet_row"])
+                        new_note = str(edited_notes.iloc[i])
+                        if update_note(selected_tab, sheet_row, new_note):
+                            saved += 1
                 if saved:
                     st.success(f"Saved {saved} note(s)!")
                     st.rerun()
