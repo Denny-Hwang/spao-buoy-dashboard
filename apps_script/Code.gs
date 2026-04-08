@@ -110,7 +110,7 @@ function decodeFY26v3(bytes) {
   var crcOk = (bytes[36] === crc8(bytes, 36));
 
   return {
-    version: "FY26(v3)", crcOk: crcOk,
+    version: "FY26(v3)",  crcOk: crcOk,
     tengCurr: tengCurr, prev1stRB: prev1stRB, prev2ndRB: prev2ndRB,
     prevGPS: prevGPS, prevTengAvg: prevTengAvg, prevTengMax: prevTengMax,
     prevBatt: prevBatt, prevEnd: prevEnd,
@@ -150,7 +150,7 @@ function decodeV64(bytes) {
   var crcOk = (bytes[44] === crc8(bytes, 44));
 
   return {
-    version: "V6.4", crcOk: crcOk,
+    version: "FY26(v6.4)", crcOk: crcOk,
     tengCurr: tengCurr, prev1stRB: prev1stRB, prev2ndRB: prev2ndRB,
     prevGPS: prevGPS, prevTengAvg: prevTengAvg, prevTengMax: prevTengMax,
     prevTengTime: prevTengTime, prevBatt: prevBatt, prevEnd: prevEnd,
@@ -169,7 +169,7 @@ function decodeV64EC(bytes) {
   var ec           = readUint16(bytes, 46) / 100.0;
   var crcOk = (bytes[48] === crc8(bytes, 48));
 
-  base.version = "V6.4+EC";
+  base.version = "FY26(v6.4)+EC";
   base.crcOk = crcOk;
   base.salinity = salinity;
   base.ec = ec;
@@ -185,23 +185,23 @@ function pad2(n) {
 function doPost(e) {
   try {
     var params = e.parameter;
-    var imei   = params.imei || "unknown";
+    var imei   = String(params.imei || "unknown");  // force string to prevent numeric tab names
     var data   = params.data || "";
 
     var bytes  = hexToBytes(data);
     var len    = bytes.length;
     var result;
 
-    if (len === 45) {
-      result = decodeV64(bytes);
-    } else if (len === 49) {
+    if (len === 49) {
       result = decodeV64EC(bytes);
+    } else if (len === 45) {
+      result = decodeV64(bytes);
     } else if (len === 38 || len === 41) {
       result = decodeFY25(bytes);
     } else if (len === 37) {
       result = decodeFY26v3(bytes);
     } else {
-      result = { version: "unknown", crcOk: false };
+      result = { version: "unknown(" + len + "B)", crcOk: false };
     }
 
     // Append to per-IMEI worksheet
