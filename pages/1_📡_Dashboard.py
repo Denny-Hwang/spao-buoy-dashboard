@@ -99,22 +99,16 @@ def render_dashboard():
                 else:
                     st.success(f"Last data received: {hours:.1f} hours ago")
 
-            # Date range filter — defaults to today
+            # Date range filter — defaults to data's first/last date
             valid_times = all_data["_parsed_time"].dropna()
             if not valid_times.empty:
-                today = date.today()
-                col_d1, col_d2, col_d3 = st.columns([2, 2, 1])
+                data_min = valid_times.min().date()
+                data_max = valid_times.max().date()
+                col_d1, col_d2 = st.columns(2)
                 with col_d1:
-                    start_date = st.date_input("Start date", value=today, key="dash_start")
+                    start_date = st.date_input("Start date", value=data_min, key="dash_start")
                 with col_d2:
-                    end_date = st.date_input("End date", value=today, key="dash_end")
-                with col_d3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Today", key="dash_today"):
-                        st.session_state["dash_start"] = today
-                        st.session_state["dash_end"] = today
-                        st.rerun()
+                    end_date = st.date_input("End date", value=data_max, key="dash_end")
                 mask = (all_data["_parsed_time"].dt.date >= start_date) & (all_data["_parsed_time"].dt.date <= end_date)
                 all_data = all_data[mask]
         except Exception:
