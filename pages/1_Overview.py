@@ -27,7 +27,7 @@ except Exception as e:
     _errors.append(f"sheets_client: {type(e).__name__}: {e}")
 
 try:
-    from utils.map_utils import build_mini_map, build_drift_map, BASEMAPS
+    from utils.map_utils import build_drift_map, BASEMAPS
 except Exception as e:
     _errors.append(f"map_utils: {type(e).__name__}: {e}")
 
@@ -165,67 +165,51 @@ def render_overview():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # === Mini Map + Activity Feed ===
-    map_col, feed_col = st.columns([3, 2])
+    # === Activity Feed ===
+    st.markdown(
+        f'<h3 style="color:{PNNL_BLUE};">Recent Activity</h3>',
+        unsafe_allow_html=True,
+    )
+    if "_parsed_time" in all_data.columns:
+        recent = all_data.dropna(subset=["_parsed_time"]).sort_values("_parsed_time", ascending=False).head(10)
+        for _, row in recent.iterrows():
+            ts = row["_parsed_time"]
+            delta = pd.Timestamp.now() - ts
+            mins = int(delta.total_seconds() / 60)
+            if mins < 1:
+                ago = "just now"
+            elif mins < 60:
+                ago = f"{mins} min ago"
+            else:
+                ago = f"{mins // 60} hr ago"
 
-    with map_col:
-        st.markdown(
-            f'<h3 style="color:{PNNL_BLUE};">Buoy Locations</h3>',
-            unsafe_allow_html=True,
-        )
-        lat_cols = [c for c in all_data.columns if "latitude" in c.lower()]
-        lon_cols = [c for c in all_data.columns if "longitude" in c.lower()]
-        if lat_cols and lon_cols:
-            mini = build_mini_map(all_data, lat_col=lat_cols[0], lon_col=lon_cols[0], device_col=dev_col)
-            st_folium(mini, width=None, height=380, returned_objects=[])
-        else:
-            st.info("No GPS data available for mapping.")
+            device_name = str(row.get(dev_col, "Unknown"))
+            version = str(row.get("Packet Ver", ""))
+            byte_len = str(row.get("Bytes", ""))
+            crc_ok = row.get("CRC Valid", None)
+            crc_str = "CRC &#10003;" if crc_ok else "CRC &#10007;" if crc_ok is not None else ""
 
-    with feed_col:
-        st.markdown(
-            f'<h3 style="color:{PNNL_BLUE};">Recent Activity</h3>',
-            unsafe_allow_html=True,
-        )
-        if "_parsed_time" in all_data.columns:
-            recent = all_data.dropna(subset=["_parsed_time"]).sort_values("_parsed_time", ascending=False).head(10)
-            for _, row in recent.iterrows():
-                ts = row["_parsed_time"]
-                delta = pd.Timestamp.now() - ts
-                mins = int(delta.total_seconds() / 60)
-                if mins < 1:
-                    ago = "just now"
-                elif mins < 60:
-                    ago = f"{mins} min ago"
-                else:
-                    ago = f"{mins // 60} hr ago"
+            # Check battery warning
+            batt_cols = [c for c in all_data.columns if "battery" in c.lower()]
+            batt_warning = ""
+            if batt_cols:
+                batt_val = pd.to_numeric(row.get(batt_cols[0], None), errors="coerce")
+                if pd.notna(batt_val) and batt_val < 3.1:
+                    batt_warning = f' &middot; <span style="color:#F57C00;">{batt_val:.2f}V low</span>'
 
-                device_name = str(row.get(dev_col, "Unknown"))
-                version = str(row.get("Packet Ver", ""))
-                byte_len = str(row.get("Bytes", ""))
-                crc_ok = row.get("CRC Valid", None)
-                crc_str = "CRC &#10003;" if crc_ok else "CRC &#10007;" if crc_ok is not None else ""
-
-                # Check battery warning
-                batt_cols = [c for c in all_data.columns if "battery" in c.lower()]
-                batt_warning = ""
-                if batt_cols:
-                    batt_val = pd.to_numeric(row.get(batt_cols[0], None), errors="coerce")
-                    if pd.notna(batt_val) and batt_val < 3.1:
-                        batt_warning = f' &middot; <span style="color:#F57C00;">{batt_val:.2f}V low</span>'
-
-                dot_color = SUCCESS if crc_ok else WARNING
-                st.markdown(
-                    f'<div style="padding:8px 0; border-bottom:1px solid #EFEFEF;">'
-                    f'<span style="color:{dot_color};">&#9679;</span> '
-                    f'<strong>{device_name}</strong> transmitted &nbsp;'
-                    f'<span style="color:#999; font-size:12px;">{ago}</span>'
-                    f'<br><span style="font-size:12px; color:#5A5A5A;">'
-                    f'{version} &middot; {byte_len}B &middot; {crc_str}{batt_warning}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("No timestamped data for activity feed.")
+            dot_color = SUCCESS if crc_ok else WARNING
+            st.markdown(
+                f'<div style="padding:8px 0; border-bottom:1px solid #EFEFEF;">'
+                f'<span style="color:{dot_color};">&#9679;</span> '
+                f'<strong>{device_name}</strong> transmitted &nbsp;'
+                f'<span style="color:#999; font-size:12px;">{ago}</span>'
+                f'<br><span style="font-size:12px; color:#5A5A5A;">'
+                f'{version} &middot; {byte_len}B &middot; {crc_str}{batt_warning}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info("No timestamped data for activity feed.")
 
     # === Trajectory Map ===
     st.markdown(f'<h3 style="color:{PNNL_BLUE};">Device Trajectories</h3>', unsafe_allow_html=True)
