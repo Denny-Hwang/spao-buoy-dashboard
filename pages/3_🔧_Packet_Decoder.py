@@ -10,11 +10,14 @@ from io import BytesIO
 from utils.decoders import auto_detect_and_decode, SAMPLE_DATA
 from utils.theme import (
     render_header, render_footer, render_empty_state,
+    render_sidebar, inject_custom_css,
     PNNL_BLUE, SUCCESS, DANGER,
 )
 
 st.set_page_config(page_title="Packet Decoder", page_icon="🔬", layout="wide")
 
+inject_custom_css()
+render_sidebar()
 render_header()
 
 st.markdown(

@@ -4,6 +4,7 @@ Color tokens based on Pacific Northwest National Laboratory brand standards.
 """
 
 import streamlit as st
+import base64
 
 # === Primary Palette ===
 PNNL_NAVY = "#00263A"           # Deep navy (primary brand)
@@ -80,14 +81,78 @@ def render_logo(height: int = 48) -> str:
     return LOGO_HTML_TEMPLATE.format(src=SPAO_LOGO_BASE64, height=height)
 
 
+def get_logo_bytes() -> bytes:
+    """Decode the base64 logo and return raw JPEG bytes."""
+    raw_b64 = SPAO_LOGO_BASE64.split(",", 1)[1]
+    return base64.b64decode(raw_b64)
+
+
+def inject_custom_css():
+    """Inject custom CSS for improved font sizes across sidebar and tabs."""
+    st.markdown("""
+    <style>
+    /* Sidebar navigation items — bigger, bolder */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a span,
+    section[data-testid="stSidebar"] nav a span {
+        font-size: 1.15rem !important;
+        font-weight: 500 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a,
+    section[data-testid="stSidebar"] nav a {
+        padding: 0.5rem 1rem !important;
+    }
+
+    /* Tab buttons (Single Decode / Batch Decode etc.) */
+    button[data-baseweb="tab"] {
+        font-size: 1.2rem !important;
+        font-weight: 600 !important;
+        padding: 14px 28px !important;
+    }
+
+    /* Selectbox labels and values */
+    div[data-baseweb="select"] > div {
+        font-size: 1.05rem !important;
+    }
+    .stSelectbox label {
+        font-size: 1.05rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def render_sidebar():
+    """Render sidebar header with logo and PNNL / SPAO BUOY branding."""
+    logo_bytes = get_logo_bytes()
+    _, center_col, _ = st.sidebar.columns([1, 3, 1])
+    with center_col:
+        st.image(logo_bytes, use_container_width=True)
+    st.sidebar.markdown(
+        '<div style="text-align:center; margin-top:-8px; margin-bottom:8px;">'
+        '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
+        'letter-spacing:3px;">PNNL</p>'
+        '<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
+        'letter-spacing:1px;">SPAO BUOY</h2>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.sidebar.divider()
+    st.sidebar.markdown(
+        '<p style="color:#5A5A5A; font-size:12px; text-align:center; margin:0;">'
+        'Pacific Northwest National Laboratory<br>'
+        'DOE Water Power Technologies Office</p>',
+        unsafe_allow_html=True,
+    )
+
+
 # === UI Components ===
 
 def render_header():
     """Render the global SPAO Buoy header with PNNL branding."""
+    logo_bytes = get_logo_bytes()
     col1, col2 = st.columns([1, 5])
 
     with col1:
-        st.markdown(render_logo(height=56), unsafe_allow_html=True)
+        st.image(logo_bytes, width=80)
 
     with col2:
         st.markdown(
