@@ -3,6 +3,8 @@ Google Sheets client for reading/writing SPAO buoy data via gspread.
 Supports both webhook-decoded data and raw RockBLOCK CSV exports.
 """
 
+import re
+
 import gspread
 import pandas as pd
 import streamlit as st
@@ -15,7 +17,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-EXCLUDED_TABS = {"Sheet1"}
+# Exclude default Google Sheets tabs ("Sheet1", "Sheet2", …) and the error log
+_DEFAULT_SHEET_RE = re.compile(r"^Sheet\d*$")
+EXCLUDED_TABS = {"_errors"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
@@ -201,10 +205,18 @@ def read_and_decode_sheet(worksheet) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def list_device_tabs(sheet_id: str = SHEET_ID) -> list[str]:
-    """Return all worksheet tab names except excluded ones."""
+    """Return all worksheet tab names except excluded ones.
+
+    Filters out default Google Sheets names (Sheet1, Sheet2, …) and
+    any tabs in EXCLUDED_TABS.
+    """
     try:
         spreadsheet = _open_sheet(sheet_id)
-        return [ws.title for ws in spreadsheet.worksheets() if ws.title not in EXCLUDED_TABS]
+        return [
+            ws.title
+            for ws in spreadsheet.worksheets()
+            if ws.title not in EXCLUDED_TABS and not _DEFAULT_SHEET_RE.match(ws.title)
+        ]
     except Exception as e:
         st.error(f"Failed to list device tabs: {e}")
         return []
