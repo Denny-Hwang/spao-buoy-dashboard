@@ -12,21 +12,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from utils.theme import render_header, render_footer, PNNL_BLUE  # noqa: E402
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_sidebar, inject_custom_css, PNNL_BLUE,
+)
 
-# --- Sidebar ---
-st.sidebar.markdown(
-    f'<h3 style="color:{PNNL_BLUE}; margin-bottom:0;">SPAO Buoy</h3>'
-    '<p style="color:#5A5A5A; font-size:13px; margin-top:0;">'
-    'Monitoring System</p>',
-    unsafe_allow_html=True,
-)
-st.sidebar.divider()
-st.sidebar.markdown(
-    "<small>Pacific Northwest National Laboratory<br>"
-    "DOE Water Power Technologies Office</small>",
-    unsafe_allow_html=True,
-)
+# --- Global CSS + Sidebar ---
+inject_custom_css()
+render_sidebar()
 
 # --- Header ---
 render_header()
@@ -85,37 +77,6 @@ st.markdown(
     4. Click **Refresh Data** on any page to pull the latest data
     """
 )
-
-# System diagnostics (collapsed by default)
-with st.expander("System Diagnostics", expanded=False):
-    st.write("**Secrets keys available:**", list(st.secrets.keys()))
-    if "gcp_service_account" in st.secrets:
-        sa = st.secrets["gcp_service_account"]
-        st.write("**gcp_service_account fields:**", list(sa.keys()))
-        st.success("gcp_service_account secret found")
-    else:
-        st.error("gcp_service_account secret NOT found")
-
-    packages = {}
-    for pkg in ["gspread", "google.oauth2.service_account", "streamlit_folium", "folium", "plotly"]:
-        try:
-            __import__(pkg)
-            packages[pkg] = "OK"
-        except ImportError as e:
-            packages[pkg] = f"MISSING: {e}"
-    st.write("**Package status:**")
-    for pkg, status in packages.items():
-        if "MISSING" in status:
-            st.error(f"{pkg}: {status}")
-        else:
-            st.write(f"- {pkg}: {status}")
-
-    try:
-        from utils.sheets_client import get_client
-        client = get_client()
-        st.success("Google Sheets connection OK")
-    except Exception as e:
-        st.error(f"Google Sheets connection FAILED: {type(e).__name__}: {e}")
 
 # --- Footer ---
 render_footer()

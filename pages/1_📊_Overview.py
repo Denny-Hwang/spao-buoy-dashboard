@@ -11,9 +11,12 @@ st.set_page_config(page_title="Overview", page_icon="🔬", layout="wide")
 from utils.theme import (  # noqa: E402
     render_header, render_footer, render_kpi_card,
     render_empty_state, render_error, battery_color,
+    render_sidebar, inject_custom_css,
     PNNL_BLUE, SUCCESS, WARNING,
 )
 
+inject_custom_css()
+render_sidebar()
 render_header()
 
 _errors = []

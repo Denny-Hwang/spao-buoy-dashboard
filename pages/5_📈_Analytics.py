@@ -11,9 +11,12 @@ st.set_page_config(page_title="Analytics", page_icon="🔬", layout="wide")
 
 from utils.theme import (  # noqa: E402
     render_header, render_footer, render_empty_state, render_error,
+    render_sidebar, inject_custom_css,
     PNNL_BLUE, SENSOR_COLORS, DEVICE_PALETTE,
 )
 
+inject_custom_css()
+render_sidebar()
 render_header()
 
 _errors = []
