@@ -13,8 +13,16 @@ MARKER_SIZE = 9
 PLOT_HEIGHT = 480
 
 COLORS = [
-    "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6",
-    "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1",
+    "#003E6B",  # PNNL blue
+    "#F0AB00",  # Battelle orange
+    "#00838F",  # Teal
+    "#5E35B1",  # Purple
+    "#2E7D32",  # Green
+    "#C62828",  # Red
+    "#6A1B9A",  # Deep purple
+    "#E65100",  # Dark orange
+    "#0277BD",  # Salinity blue
+    "#00695C",  # Dark teal
 ]
 
 

@@ -1,9 +1,37 @@
-# SPAO Buoy Dashboard
+# SPAO Buoy Monitoring System
 
-Real-time monitoring system for **SPAO (Self-Powered Arctic Ocean)** buoy deployments.  
-Reads satellite telemetry from Google Sheets, decodes hex-encoded packets, and provides interactive visualization.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 
-> Developed at **Pacific Northwest National Laboratory (PNNL)**
+Real-time monitoring dashboard for the Self-Powered Arctic Ocean (SPAO) buoy system, developed at Pacific Northwest National Laboratory under the DOE Water Power Technologies Office.
+
+**Live Demo:** [https://spao-buoy-dashboard.streamlit.app/](https://spao-buoy-dashboard.streamlit.app/)
+
+---
+
+## Features
+
+| Page | What it does |
+|------|-------------|
+| **Overview** | KPI cards (active buoys, last contact, data quality), mini map, activity feed, trajectory map |
+| **Live Telemetry** | Real-time data table with battery/CRC badges, date filtering, inline notes editing, CSV export |
+| **Packet Decoder** | Hex packet decoder — single input with CRC card and GPS mini-map, or batch CSV upload |
+| **Archive** | Multi-device data browser with KPI summary statistics |
+| **Analytics** | Drift trajectory maps with detail panel, time-series sensor plots, custom 3D scatter |
+
+### Supported Hardware
+
+Six telemetry packet versions are auto-detected by byte length:
+
+| Version | Bytes | Key Difference |
+|---------|-------|----------------|
+| FY25 | 38 | Bering Sea deployment, supercapacitor fields |
+| FY26 (v3) | 37 | Simplified previous-session fields |
+| FY26 (v5) | 43 | Extended sensor set |
+| FY26 (v5) + EC | 47 | Adds electrical conductivity & salinity |
+| FY26 (v6.4) | 45 | Adds Prev Oper Time, TENG scale change |
+| FY26 (v6.4) + EC | 49 | v6.4 + conductivity & salinity |
 
 ---
 
@@ -47,31 +75,6 @@ The app opens at `http://localhost:8501`. Select a page from the sidebar to star
 
 ---
 
-## Features
-
-| Page | What it does |
-|------|-------------|
-| **Dashboard** | Device status cards (battery, GPS, message count) and satellite trajectory map |
-| **Live Data** | Real-time data table with date filtering, inline notes editing, CSV export |
-| **Decoder** | Hex packet decoder — single input or batch CSV upload (RockBLOCK format) |
-| **Historical** | Multi-device data browser with summary statistics |
-| **Visualization** | Drift trajectory maps, time-series sensor plots, and custom 3D scatter |
-
-### Supported Hardware
-
-Six telemetry packet versions are auto-detected by byte length:
-
-| Version | Bytes | Key Difference |
-|---------|-------|----------------|
-| FY25 | 38 | Bering Sea deployment, supercapacitor fields |
-| FY26 (v3) | 37 | Simplified previous-session fields |
-| FY26 (v5) | 43 | Extended sensor set |
-| FY26 (v5) + EC | 47 | Adds electrical conductivity & salinity |
-| FY26 (v6.4) | 45 | Adds Prev Oper Time, TENG scale change |
-| FY26 (v6.4) + EC | 49 | v6.4 + conductivity & salinity |
-
----
-
 ## Architecture Overview
 
 ```
@@ -80,13 +83,14 @@ Six telemetry packet versions are auto-detected by byte length:
 │                                                         │
 │  app.py (Home)                                          │
 │  pages/                                                 │
-│    ├─ Dashboard    ── status cards, trajectory map      │
-│    ├─ Live Data    ── data table, notes editing         │
-│    ├─ Decoder      ── hex packet decoder                │
-│    ├─ Historical   ── past deployment browser           │
-│    └─ Visualization── drift maps, sensor plots          │
+│    ├─ Overview      ── KPI cards, mini map, activity    │
+│    ├─ Live Telemetry── data table, battery/CRC badges   │
+│    ├─ Packet Decoder── hex decoder, GPS mini-map        │
+│    ├─ Archive       ── past deployment browser          │
+│    └─ Analytics     ── drift maps, sensor plots         │
 │                                                         │
 │  utils/                                                 │
+│    ├─ theme.py         ── PNNL brand colors, UI helpers │
 │    ├─ sheets_client.py ── Google Sheets read/write      │
 │    ├─ decoders.py      ── packet decode (6 versions)    │
 │    ├─ map_utils.py     ── Folium map builder            │
@@ -114,6 +118,7 @@ Six telemetry packet versions are auto-detected by byte length:
 - **Data flows in two ways:** the Apps Script webhook writes decoded telemetry into Google Sheets, and the Streamlit app reads it for display and analysis.
 - **Packet decoding** is duplicated in both the webhook (Apps Script) and the dashboard (Python) so data can be ingested from either raw or pre-decoded sources.
 - **Caching** — Streamlit's `@st.cache_data` with TTLs (60–300s) minimizes API calls.
+- **PNNL Branding** — Consistent color system based on PNNL brand standards with accessible color contrast.
 
 For detailed architecture documentation, see the [docs/](docs/) folder.
 
@@ -148,7 +153,17 @@ streamlit run app.py --server.port 8501
 
 ---
 
+## License
+
+This project is licensed under the GPL-3.0 License — see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Pacific Northwest National Laboratory
+- DOE Water Power Technologies Office
+- NOAA PMEL (Bering Sea deployment support)
+
 ## Contact
 
-**Sungjoo Hwang** — sungjoo.hwang@pnnl.gov  
+**Sungjoo Hwang** — sungjoo.hwang@pnnl.gov
 Pacific Northwest National Laboratory

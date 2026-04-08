@@ -1,5 +1,5 @@
 """
-Page 3: Decoder Tool — Standalone packet decoder for SPAO telemetry.
+Page 3: Packet Decoder — Standalone packet decoder for SPAO telemetry.
 Supports manual hex input, CSV batch decode, and RockBLOCK export format.
 """
 
@@ -8,9 +8,19 @@ import pandas as pd
 from io import BytesIO
 
 from utils.decoders import auto_detect_and_decode, SAMPLE_DATA
+from utils.theme import (
+    render_header, render_footer, render_empty_state,
+    PNNL_BLUE, SUCCESS, DANGER,
+)
 
-st.set_page_config(page_title="Decoder", page_icon="🔧", layout="wide")
-st.title("🔧 Packet Decoder")
+st.set_page_config(page_title="Packet Decoder", page_icon="🔬", layout="wide")
+
+render_header()
+
+st.markdown(
+    f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">Packet Decoder</h1>',
+    unsafe_allow_html=True,
+)
 
 VERSIONS = ["Auto-detect", "FY26(v6.4)+EC", "FY26(v6.4)", "FY26(v5)+EC", "FY26(v5)", "FY26(v3)", "FY25"]
 
@@ -26,20 +36,39 @@ with tab_single:
     with col1:
         hex_input = st.text_input(
             "Hex String",
-            placeholder="Enter hex string (90 chars = 45B without EC, 98 chars = 49B with EC)",
+            placeholder="Enter hex string (e.g., 90 chars = 45B, 98 chars = 49B with EC)",
         )
+        # Character counter
+        if hex_input:
+            hex_clean = hex_input.strip().replace(" ", "").replace("0x", "")
+            char_count = len(hex_clean)
+            byte_count = char_count // 2
+            st.markdown(
+                f'<span style="font-size:12px; color:#5A5A5A;">'
+                f'{char_count} chars &middot; {byte_count} bytes</span>',
+                unsafe_allow_html=True,
+            )
     with col2:
         st.write("")
         st.write("")
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
-            if st.button("45B Sample"):
-                hex_input = SAMPLE_DATA["FY26(v6.4) 45B"]
-                st.session_state["hex_input_val"] = hex_input
-        with btn_col2:
-            if st.button("49B Sample"):
-                hex_input = SAMPLE_DATA["FY26(v6.4)+EC 49B"]
-                st.session_state["hex_input_val"] = hex_input
+        # Sample buttons — all versions
+        sample_keys = list(SAMPLE_DATA.keys())
+        sample_cols = st.columns(min(len(sample_keys), 3))
+        for i, key in enumerate(sample_keys[:3]):
+            with sample_cols[i]:
+                short_label = key.split()[0] if " " in key else key
+                if st.button(short_label, key=f"sample_{i}"):
+                    hex_input = SAMPLE_DATA[key]
+                    st.session_state["hex_input_val"] = hex_input
+
+    # Additional sample buttons
+    if len(sample_keys) > 3:
+        extra_cols = st.columns(min(len(sample_keys) - 3, 4))
+        for i, key in enumerate(sample_keys[3:]):
+            with extra_cols[i]:
+                if st.button(key.split()[0], key=f"sample_extra_{i}"):
+                    hex_input = SAMPLE_DATA[key]
+                    st.session_state["hex_input_val"] = hex_input
 
     # Use session state for sample loading
     if "hex_input_val" in st.session_state and not hex_input:
@@ -59,16 +88,40 @@ with tab_single:
                 col_a, col_b, col_c = st.columns(3)
                 col_a.metric("Version", result["version"])
                 col_b.metric("Bytes", result["byte_len"])
-                if result["crc_ok"]:
-                    col_c.success("CRC: PASS")
-                else:
-                    col_c.error("CRC: FAIL")
+
+                # CRC validation card
+                crc_ok = result["crc_ok"]
+                crc_color = SUCCESS if crc_ok else DANGER
+                crc_label = "Valid" if crc_ok else "FAIL"
+                crc_icon = "&#10003;" if crc_ok else "&#10007;"
+                with col_c:
+                    st.markdown(
+                        f'<div style="background:{"#E8F5E9" if crc_ok else "#FEF2F2"}; '
+                        f'border:1px solid {crc_color}; border-radius:4px; padding:12px; text-align:center;">'
+                        f'<div style="font-size:12px; color:#5A5A5A;">CRC Validation</div>'
+                        f'<div style="font-size:24px; color:{crc_color}; font-weight:700;">'
+                        f'{crc_icon} {crc_label}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
                 # Results table
                 if result["fields"]:
                     fields_df = pd.DataFrame(result["fields"])
                     fields_df.columns = ["Field Name", "Hex Bytes", "Raw Value", "Decoded Value", "Unit"]
                     st.dataframe(fields_df, use_container_width=True, hide_index=True)
+
+                # GPS mini-map
+                if result["fields"]:
+                    lat_field = next((f for f in result["fields"] if "latitude" in f["name"].lower()), None)
+                    lon_field = next((f for f in result["fields"] if "longitude" in f["name"].lower()), None)
+                    if lat_field and lon_field:
+                        lat_val = float(lat_field["value"])
+                        lon_val = float(lon_field["value"])
+                        if lat_val != 0 or lon_val != 0:
+                            st.markdown(f'<h4 style="color:{PNNL_BLUE};">GPS Location</h4>', unsafe_allow_html=True)
+                            map_df = pd.DataFrame({"lat": [lat_val], "lon": [lon_val]})
+                            st.map(map_df, zoom=5)
 
                 # Raw binary dump
                 with st.expander("Raw Binary Dump"):
@@ -85,7 +138,7 @@ with tab_single:
                     except Exception:
                         st.code(hex_input)
         else:
-            st.info("Enter a hex string or load sample data.")
+            render_empty_state("Enter a hex string", "Paste a hex-encoded packet or load sample data above.")
 
 with tab_batch:
     st.markdown(
@@ -102,7 +155,7 @@ with tab_batch:
             input_df = None
 
         if input_df is not None:
-            # Auto-detect hex column — support RockBLOCK format and custom formats
+            # Auto-detect hex column
             hex_col = None
             for candidate in ["Payload", "payload", "data", "Data", "hex", "Hex", "Raw Hex"]:
                 if candidate in input_df.columns:
@@ -110,12 +163,10 @@ with tab_batch:
                     break
 
             if hex_col is None:
-                # Let user pick the column
                 st.warning("Could not auto-detect hex column.")
                 hex_col = st.selectbox("Select column containing hex data", input_df.columns)
 
             if hex_col:
-                # Detect format for metadata extraction
                 cols = set(input_df.columns)
                 is_rockblock_csv = "Device" in cols or "Date Time (UTC)" in cols
                 is_rb_download = "IMEI" in cols and "Time" in cols
@@ -141,7 +192,6 @@ with tab_batch:
                             "CRC": result.get("crc_ok", False),
                         }
 
-                        # Include metadata based on detected format
                         if is_rockblock_csv:
                             row_data["Timestamp"] = row.get("Date Time (UTC)", row.get("Date Time", ""))
                             row_data["Device"] = row.get("Device", "")
@@ -162,7 +212,6 @@ with tab_batch:
                     results_df = pd.DataFrame(results)
                     st.dataframe(results_df, use_container_width=True, hide_index=True)
 
-                    # Download
                     csv_buf = BytesIO()
                     results_df.to_csv(csv_buf, index=False)
                     st.download_button(
@@ -177,5 +226,4 @@ with st.expander("Sample Hex Strings"):
     for ver, hex_str in SAMPLE_DATA.items():
         st.code(f"{ver}: {hex_str}")
 
-st.divider()
-st.caption("SPAO Buoy Dashboard — Pacific Northwest National Laboratory")
+render_footer()
