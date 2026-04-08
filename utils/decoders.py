@@ -1,5 +1,11 @@
 """
-SPAO Buoy packet decoders for FY25, FY26(v3), FY26, and FY26+EC telemetry formats.
+SPAO Buoy packet decoders for FY25, FY26(v3), FY26, FY26+EC, V6.4, and V6.4+EC telemetry formats.
+
+Packet Structure Definition (V6.4):
+  - Added Prev Oper Time (2 bytes, uint16, sec) at offset 22 (shifts all subsequent fields +2)
+  - TENG Current Avg is now best 1-min sliding window average, scale ÷100
+  - Prev TENG Avg/Max now scale ÷100
+  - 45B (no EC) / 49B (with EC+SSS)
 """
 
 import struct
@@ -413,6 +419,209 @@ def decode_fy26_ec(data: bytes) -> dict:
     }
 
 
+def decode_v64(data: bytes) -> dict:
+    """Decode V6.4 45-byte packet.
+
+    V6.4 changes from FY26 (43B):
+    - TENG Current Avg is best 1-min sliding window average, scale ÷100
+    - Prev TENG Avg/Max now scale ÷100
+    - Added Prev Oper Time (2 bytes) at offset 22
+    - All subsequent fields shifted +2 bytes
+    """
+    fields = []
+
+    # TENG Current Avg (0-1) — best 1-min window, scale 100
+    raw = _uint16(data, 0)
+    fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, round(raw / 100, 2), "mA"))
+
+    # --- Previous Session ---
+
+    # Prev 1st RB Time (2-3)
+    raw = _uint16(data, 2)
+    fields.append(_field("Prev 1st RB Time", _hex_slice(data, 2, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev 2nd RB Time (4-5)
+    raw = _uint16(data, 4)
+    fields.append(_field("Prev 2nd RB Time", _hex_slice(data, 4, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev GPS Time (6-7)
+    raw = _uint16(data, 6)
+    fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev TENG Avg (8-9) — scale 100
+    raw = _uint16(data, 8)
+    fields.append(_field("Prev TENG Avg", _hex_slice(data, 8, 2), raw, round(raw / 100, 2), "mA"))
+
+    # Prev TENG Max (10-11) — scale 100
+    raw = _uint16(data, 10)
+    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 100, 2), "mA"))
+
+    # Prev TENG Time (12-17) — YY,MM,DD,HH,mm,SS
+    ts_bytes = data[12:18]
+    ts_str = f"20{ts_bytes[0]:02d}-{ts_bytes[1]:02d}-{ts_bytes[2]:02d} {ts_bytes[3]:02d}:{ts_bytes[4]:02d}:{ts_bytes[5]:02d}"
+    fields.append(_field("Prev TENG Time", _hex_slice(data, 12, 6), list(ts_bytes), ts_str, ""))
+
+    # Prev Battery (18-19)
+    raw = _uint16(data, 18)
+    fields.append(_field("Prev Battery", _hex_slice(data, 18, 2), raw, round(raw / 1000, 3), "V"))
+
+    # Prev End Marker (20-21)
+    raw = _uint16(data, 20)
+    fields.append(_field("Prev End Marker", _hex_slice(data, 20, 2), raw, raw, ""))
+
+    # Prev Oper Time (22-23) — NEW in V6.4
+    raw = _uint16(data, 22)
+    fields.append(_field("Prev Oper Time", _hex_slice(data, 22, 2), raw, raw, "s"))
+
+    # --- Current Session ---
+
+    # Battery (24-25)
+    raw = _uint16(data, 24)
+    fields.append(_field("Battery", _hex_slice(data, 24, 2), raw, round(raw / 1000, 3), "V"))
+
+    # GPS Latitude (26-29) — signed
+    raw = _int32(data, 26)
+    fields.append(_field("GPS Latitude", _hex_slice(data, 26, 4), raw, round(raw / 1e7, 7), "°"))
+
+    # GPS Longitude (30-33) — signed
+    raw = _int32(data, 30)
+    fields.append(_field("GPS Longitude", _hex_slice(data, 30, 4), raw, round(raw / 1e7, 7), "°"))
+
+    # GPS Time (34-35)
+    raw = _uint16(data, 34)
+    fields.append(_field("GPS Time", _hex_slice(data, 34, 2), raw, round(raw / 10, 1), "s"))
+
+    # Pressure (36-37)
+    raw = _uint16(data, 36)
+    fields.append(_field("Pressure", _hex_slice(data, 36, 2), raw, round(raw / 1000, 3), "psi"))
+
+    # Internal Temp (38-39) — signed
+    raw = _int16(data, 38)
+    fields.append(_field("Internal Temp", _hex_slice(data, 38, 2), raw, round(raw / 100, 2), "°C"))
+
+    # Humidity (40-41)
+    raw = _uint16(data, 40)
+    fields.append(_field("Humidity", _hex_slice(data, 40, 2), raw, round(raw / 10, 1), "%RH"))
+
+    # SST (42-43) — signed
+    raw = _int16(data, 42)
+    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / 1000, 3), "°C"))
+
+    # CRC (44)
+    crc_byte = data[44]
+    crc_calc = calculate_crc8(data[:44])
+    crc_ok = crc_byte == crc_calc
+
+    return {
+        "version": "V6.4",
+        "byte_len": 45,
+        "crc_ok": crc_ok,
+        "fields": fields,
+    }
+
+
+def decode_v64_ec(data: bytes) -> dict:
+    """Decode V6.4+EC 49-byte packet (V6.4 + SSS/conductivity)."""
+    fields = []
+
+    # TENG Current Avg (0-1) — best 1-min window, scale 100
+    raw = _uint16(data, 0)
+    fields.append(_field("TENG Current Avg", _hex_slice(data, 0, 2), raw, round(raw / 100, 2), "mA"))
+
+    # --- Previous Session ---
+
+    # Prev 1st RB Time (2-3)
+    raw = _uint16(data, 2)
+    fields.append(_field("Prev 1st RB Time", _hex_slice(data, 2, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev 2nd RB Time (4-5)
+    raw = _uint16(data, 4)
+    fields.append(_field("Prev 2nd RB Time", _hex_slice(data, 4, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev GPS Time (6-7)
+    raw = _uint16(data, 6)
+    fields.append(_field("Prev GPS Time", _hex_slice(data, 6, 2), raw, round(raw / 10, 1), "s"))
+
+    # Prev TENG Avg (8-9) — scale 100
+    raw = _uint16(data, 8)
+    fields.append(_field("Prev TENG Avg", _hex_slice(data, 8, 2), raw, round(raw / 100, 2), "mA"))
+
+    # Prev TENG Max (10-11) — scale 100
+    raw = _uint16(data, 10)
+    fields.append(_field("Prev TENG Max", _hex_slice(data, 10, 2), raw, round(raw / 100, 2), "mA"))
+
+    # Prev TENG Time (12-17) — YY,MM,DD,HH,mm,SS
+    ts_bytes = data[12:18]
+    ts_str = f"20{ts_bytes[0]:02d}-{ts_bytes[1]:02d}-{ts_bytes[2]:02d} {ts_bytes[3]:02d}:{ts_bytes[4]:02d}:{ts_bytes[5]:02d}"
+    fields.append(_field("Prev TENG Time", _hex_slice(data, 12, 6), list(ts_bytes), ts_str, ""))
+
+    # Prev Battery (18-19)
+    raw = _uint16(data, 18)
+    fields.append(_field("Prev Battery", _hex_slice(data, 18, 2), raw, round(raw / 1000, 3), "V"))
+
+    # Prev End Marker (20-21)
+    raw = _uint16(data, 20)
+    fields.append(_field("Prev End Marker", _hex_slice(data, 20, 2), raw, raw, ""))
+
+    # Prev Oper Time (22-23) — NEW in V6.4
+    raw = _uint16(data, 22)
+    fields.append(_field("Prev Oper Time", _hex_slice(data, 22, 2), raw, raw, "s"))
+
+    # --- Current Session ---
+
+    # Battery (24-25)
+    raw = _uint16(data, 24)
+    fields.append(_field("Battery", _hex_slice(data, 24, 2), raw, round(raw / 1000, 3), "V"))
+
+    # GPS Latitude (26-29) — signed
+    raw = _int32(data, 26)
+    fields.append(_field("GPS Latitude", _hex_slice(data, 26, 4), raw, round(raw / 1e7, 7), "°"))
+
+    # GPS Longitude (30-33) — signed
+    raw = _int32(data, 30)
+    fields.append(_field("GPS Longitude", _hex_slice(data, 30, 4), raw, round(raw / 1e7, 7), "°"))
+
+    # GPS Time (34-35)
+    raw = _uint16(data, 34)
+    fields.append(_field("GPS Time", _hex_slice(data, 34, 2), raw, round(raw / 10, 1), "s"))
+
+    # Pressure (36-37)
+    raw = _uint16(data, 36)
+    fields.append(_field("Pressure", _hex_slice(data, 36, 2), raw, round(raw / 1000, 3), "psi"))
+
+    # Internal Temp (38-39) — signed
+    raw = _int16(data, 38)
+    fields.append(_field("Internal Temp", _hex_slice(data, 38, 2), raw, round(raw / 100, 2), "°C"))
+
+    # Humidity (40-41)
+    raw = _uint16(data, 40)
+    fields.append(_field("Humidity", _hex_slice(data, 40, 2), raw, round(raw / 10, 1), "%RH"))
+
+    # SST (42-43) — signed
+    raw = _int16(data, 42)
+    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / 1000, 3), "°C"))
+
+    # SSS / Salinity (44-45)
+    raw = _uint16(data, 44)
+    fields.append(_field("Salinity", _hex_slice(data, 44, 2), raw, round(raw / 1000, 3), "PSS-78"))
+
+    # EC Conductivity (46-47)
+    raw = _uint16(data, 46)
+    fields.append(_field("EC Conductivity", _hex_slice(data, 46, 2), raw, round(raw / 100, 2), "mS/cm"))
+
+    # CRC (48)
+    crc_byte = data[48]
+    crc_calc = calculate_crc8(data[:48])
+    crc_ok = crc_byte == crc_calc
+
+    return {
+        "version": "V6.4+EC",
+        "byte_len": 49,
+        "crc_ok": crc_ok,
+        "fields": fields,
+    }
+
+
 def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None) -> dict:
     """
     Decode a hex-encoded telemetry packet.
@@ -442,6 +651,8 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
             "FY26(v3)": (37, decode_fy26_v3),
             "FY26": (43, decode_fy26),
             "FY26+EC": (47, decode_fy26_ec),
+            "V6.4": (45, decode_v64),
+            "V6.4+EC": (49, decode_v64_ec),
         }
         if force_version not in version_map:
             return {"error": f"Unknown version: {force_version}", "version": None, "byte_len": byte_len, "crc_ok": False, "fields": []}
@@ -463,11 +674,15 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
         return decode_fy26_v3(data)
     elif byte_len == 43:
         return decode_fy26(data)
+    elif byte_len == 45:
+        return decode_v64(data)
     elif byte_len == 47:
         return decode_fy26_ec(data)
+    elif byte_len == 49:
+        return decode_v64_ec(data)
     else:
         return {
-            "error": f"Unknown packet length: {byte_len} bytes. Expected 37, 38, 41, 43, or 47.",
+            "error": f"Unknown packet length: {byte_len} bytes. Expected 37, 38, 41, 43, 45, 47, or 49.",
             "version": None,
             "byte_len": byte_len,
             "crc_ok": False,
@@ -477,6 +692,8 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
 
 # Sample data for testing
 SAMPLE_DATA = {
+    "V6.4 (45B)": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d48c",
+    "V6.4+EC (49B)": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d486c414b452",
     "FY26(v3)": "0002037300000272000200040f5800000f580000000000000000027239a9047c017a0a1441",
     "FY25": "000200000000000000000000000000" + "0f58" + "00000000" + "00000000" + "0000" + "39a9" + "047c" + "017a" + "0a14" + "0000" + "00",
 }

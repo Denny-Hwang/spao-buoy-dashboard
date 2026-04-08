@@ -5,6 +5,7 @@ Page 2: Live Data — Real-time data table with inline notes editing.
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from datetime import date
 
 st.set_page_config(page_title="Live Data", page_icon="📊", layout="wide")
 st.title("📊 Live Data")
@@ -83,7 +84,7 @@ def render_live_data():
 
     st.write(f"**{len(df)} records** for device `{selected}`")
 
-    # Date range filter
+    # Date range filter — defaults to today
     time_cols = [c for c in df.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if time_cols:
         time_col = time_cols[0]
@@ -91,11 +92,19 @@ def render_live_data():
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             valid_times = df[time_col].dropna()
             if not valid_times.empty:
-                col1, col2 = st.columns(2)
+                today = date.today()
+                col1, col2, col3 = st.columns([2, 2, 1])
                 with col1:
-                    start_date = st.date_input("Start date", value=valid_times.min().date())
+                    start_date = st.date_input("Start date", value=today, key="live_start")
                 with col2:
-                    end_date = st.date_input("End date", value=valid_times.max().date())
+                    end_date = st.date_input("End date", value=today, key="live_end")
+                with col3:
+                    st.write("")
+                    st.write("")
+                    if st.button("Today", key="live_today"):
+                        st.session_state["live_start"] = today
+                        st.session_state["live_end"] = today
+                        st.rerun()
                 mask = (df[time_col].dt.date >= start_date) & (df[time_col].dt.date <= end_date)
                 df = df[mask]
         except Exception:

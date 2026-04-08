@@ -4,6 +4,7 @@ Page 1: Dashboard — Device overview with trajectory map and status cards.
 
 import streamlit as st
 import pandas as pd
+from datetime import date
 
 st.set_page_config(page_title="Dashboard", page_icon="📡", layout="wide")
 st.title("📡 Dashboard")
@@ -84,7 +85,7 @@ def render_dashboard():
         st.info("No data for selected devices.")
         return
 
-    # System status
+    # Parse time column and add date filter
     time_cols = [c for c in all_data.columns if "time" in c.lower() or "timestamp" in c.lower() or "date" in c.lower()]
     if time_cols:
         try:
@@ -97,8 +98,31 @@ def render_dashboard():
                     st.success(f"Last data received: {int(delta.total_seconds() / 60)} minutes ago")
                 else:
                     st.success(f"Last data received: {hours:.1f} hours ago")
+
+            # Date range filter — defaults to today
+            valid_times = all_data["_parsed_time"].dropna()
+            if not valid_times.empty:
+                today = date.today()
+                col_d1, col_d2, col_d3 = st.columns([2, 2, 1])
+                with col_d1:
+                    start_date = st.date_input("Start date", value=today, key="dash_start")
+                with col_d2:
+                    end_date = st.date_input("End date", value=today, key="dash_end")
+                with col_d3:
+                    st.write("")
+                    st.write("")
+                    if st.button("Today", key="dash_today"):
+                        st.session_state["dash_start"] = today
+                        st.session_state["dash_end"] = today
+                        st.rerun()
+                mask = (all_data["_parsed_time"].dt.date >= start_date) & (all_data["_parsed_time"].dt.date <= end_date)
+                all_data = all_data[mask]
         except Exception:
             pass
+
+    if all_data.empty:
+        st.info("No data for the selected date range.")
+        return
 
     st.subheader(f"Active Devices: {len(selected_devices)}")
 
