@@ -119,16 +119,6 @@ def render_analytics():
         dev_col = "Device Tab"
 
     selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
-
-    # Reset date inputs when device selection changes
-    _prev_sel = st.session_state.get("_viz_prev_devices")
-    if _prev_sel != selected_devices:
-        st.session_state["_viz_prev_devices"] = selected_devices
-        for k in ("viz_start", "viz_start_time", "viz_end", "viz_end_time"):
-            st.session_state.pop(k, None)
-        if _prev_sel is not None:
-            st.rerun()
-
     if not selected_devices:
         st.info("Select at least one device.")
         return
@@ -147,6 +137,16 @@ def render_analytics():
         if not valid.empty:
             data_min = valid.min()
             data_max = valid.max()
+
+            # Reset dates when device selection changes
+            _sel_key = str(sorted(selected_devices))
+            if st.session_state.get("_viz_sel_key") != _sel_key:
+                st.session_state["_viz_sel_key"] = _sel_key
+                st.session_state["viz_start"] = data_min.date()
+                st.session_state["viz_start_time"] = time(0, 0)
+                st.session_state["viz_end"] = data_max.date()
+                st.session_state["viz_end_time"] = time(23, 59)
+
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 start = st.date_input("Start", value=data_min.date(), key="viz_start")

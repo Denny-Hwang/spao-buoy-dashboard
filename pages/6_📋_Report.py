@@ -139,19 +139,6 @@ def render_report():
     df = raw_df.copy()
     time_col = _find_time_column(df)
 
-    # Reset date inputs when device changes
-    prev_device = st.session_state.get("_rpt_prev_device")
-    if prev_device != selected_tab:
-        st.session_state["_rpt_prev_device"] = selected_tab
-        # Clear stale date keys so they pick up new defaults
-        for k in ("rpt_start", "rpt_start_t", "rpt_end", "rpt_end_t"):
-            st.session_state.pop(k, None)
-        # Clear stale PDF so old report doesn't linger
-        st.session_state.pop("report_pdf", None)
-        st.session_state.pop("report_filename", None)
-        if prev_device is not None:
-            st.rerun()
-
     # Date range
     if time_col:
         valid_times = df[time_col].dropna()
@@ -161,6 +148,17 @@ def render_report():
         else:
             data_min = datetime.now()
             data_max = datetime.now()
+
+        # Reset dates when device changes
+        if st.session_state.get("_rpt_sel_key") != selected_tab:
+            st.session_state["_rpt_sel_key"] = selected_tab
+            st.session_state["rpt_start"] = data_min.date()
+            st.session_state["rpt_start_t"] = time(0, 0)
+            st.session_state["rpt_end"] = data_max.date()
+            st.session_state["rpt_end_t"] = time(23, 59)
+            # Clear stale PDF
+            st.session_state.pop("report_pdf", None)
+            st.session_state.pop("report_filename", None)
 
         with col_s:
             start_d = st.date_input("Start", value=data_min.date(), key="rpt_start")

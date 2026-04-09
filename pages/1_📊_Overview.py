@@ -96,16 +96,6 @@ def render_overview():
 
     # Device filter
     selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
-
-    # Reset date inputs when device selection changes
-    _prev_sel = st.session_state.get("_dash_prev_devices")
-    if _prev_sel != selected_devices:
-        st.session_state["_dash_prev_devices"] = selected_devices
-        for k in ("dash_start", "dash_start_time", "dash_end", "dash_end_time"):
-            st.session_state.pop(k, None)
-        if _prev_sel is not None:
-            st.rerun()
-
     if not selected_devices:
         st.info("Select at least one device.")
         return
@@ -143,6 +133,16 @@ def render_overview():
             if not valid_times.empty:
                 data_min = valid_times.min()
                 data_max = valid_times.max()
+
+                # Reset dates when device selection changes
+                _sel_key = str(sorted(selected_devices))
+                if st.session_state.get("_dash_sel_key") != _sel_key:
+                    st.session_state["_dash_sel_key"] = _sel_key
+                    st.session_state["dash_start"] = data_min.date()
+                    st.session_state["dash_start_time"] = time(0, 0)
+                    st.session_state["dash_end"] = data_max.date()
+                    st.session_state["dash_end_time"] = time(23, 59)
+
                 col_d1, col_d2, col_d3, col_d4 = st.columns(4)
                 with col_d1:
                     start_date = st.date_input("Start date", value=data_min.date(), key="dash_start")
