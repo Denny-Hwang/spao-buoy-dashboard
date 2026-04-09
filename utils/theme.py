@@ -4,6 +4,21 @@ Color tokens based on Pacific Northwest National Laboratory brand standards.
 """
 
 import streamlit as st
+import base64
+import os
+
+
+def _load_logo_base64():
+    """Load the SPAO BUOY logo from assets and return as a data URI."""
+    logo_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'SPAO_BUOY_logo.jpg')
+    try:
+        with open(logo_path, 'rb') as f:
+            return f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode()}"
+    except FileNotFoundError:
+        return None
+
+
+SPAO_LOGO_BASE64 = _load_logo_base64()
 
 # === Primary Palette ===
 PNNL_NAVY = "#00263A"           # Deep navy (primary brand)
@@ -113,12 +128,19 @@ def inject_custom_css():
 
 def render_sidebar():
     """Render sidebar header with PNNL / SPAO BUOY branding at top, org info at bottom."""
+    logo_html = ""
+    if SPAO_LOGO_BASE64:
+        logo_html = (
+            f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
+            f'style="height:80px; margin-bottom:4px;">'
+        )
     st.sidebar.markdown(
         '<div style="text-align:center; padding:8px 0;">'
         '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
         'letter-spacing:3px;">PNNL</p>'
         '<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
         'letter-spacing:1px;">SPAO BUOY</h2>'
+        f'{logo_html}'
         '</div>',
         unsafe_allow_html=True,
     )
