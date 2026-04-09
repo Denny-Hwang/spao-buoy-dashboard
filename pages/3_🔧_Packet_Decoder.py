@@ -112,7 +112,7 @@ with tab_single:
                 if result["fields"]:
                     fields_df = pd.DataFrame(result["fields"])
                     fields_df.columns = ["Field Name", "Hex Bytes", "Raw Value", "Decoded Value", "Unit"]
-                    st.dataframe(fields_df, use_container_width=True, hide_index=True)
+                    st.dataframe(fields_df, width="stretch", hide_index=True)
 
                 # GPS mini-map
                 if result["fields"]:
@@ -213,7 +213,7 @@ with tab_batch:
                         progress.progress((i + 1) / len(input_df))
 
                     results_df = pd.DataFrame(results)
-                    st.dataframe(results_df, use_container_width=True, hide_index=True)
+                    st.dataframe(results_df, width="stretch", hide_index=True)
 
                     csv_buf = BytesIO()
                     results_df.to_csv(csv_buf, index=False)

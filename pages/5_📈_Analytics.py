@@ -289,7 +289,7 @@ def render_analytics():
                     sensor_color = _get_sensor_color(title)
                     y_label = f"{y_col} ({unit})" if unit else y_col
                     apply_plot_style(fig, title=title, x_title=time_col, y_title=y_label)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
             pres_cols = [c for c in plot_base.columns if "pressure" in c.lower()]
             sst_cols = [c for c in plot_base.columns if "sst" in c.lower() or "ocean temp" in c.lower()]
@@ -305,7 +305,7 @@ def render_analytics():
                     color_col=dev_col,
                     trendline=True,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             hum_cols = [c for c in plot_base.columns if "humidity" in c.lower()]
             temp_cols = [c for c in plot_base.columns if "internal temp" in c.lower()]
@@ -352,7 +352,7 @@ def render_analytics():
                             showgrid=False,
                         ),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
     # --- Custom Plot ---
     with tab_custom:
@@ -385,20 +385,20 @@ def render_analytics():
 
                 if plot_type == "Line":
                     fig = make_time_series(plot_df, x_var, y_var, color_col=color_col)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 elif plot_type == "Scatter":
                     fig = make_scatter(plot_df, x_var, y_var, color_col=color_col)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 elif plot_type == "X-Y with Trendline":
                     fig = make_scatter(plot_df, x_var, y_var, color_col=color_col, trendline=True)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 elif plot_type == "3D Scatter":
                     if z_var == "None":
                         st.warning("Select a Z-axis variable for 3D scatter.")
                     else:
                         plot_df = plot_df.dropna(subset=[z_var])
                         fig = make_3d_scatter(plot_df, x_var, y_var, z_var, color_col=color_col)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
 
 render_analytics()
