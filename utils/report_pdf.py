@@ -563,4 +563,4 @@ def generate_report_pdf(
         img = fig_to_png(scatter_fig, width=900, height=400)
         pdf.add_chart_image(img, width=140)
 
-    return pdf.output()
+    return bytes(pdf.output())
