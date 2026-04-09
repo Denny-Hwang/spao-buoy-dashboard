@@ -2,6 +2,7 @@
 PDF report generator for SPAO Buoy device data.
 
 Uses fpdf2 for layout and kaleido (via Plotly) for chart image export.
+Map trajectory uses staticmap (OSM tiles) with Plotly XY fallback.
 """
 
 import io
@@ -139,18 +140,90 @@ def build_sensor_chart(df: pd.DataFrame, time_col: str, y_col: str,
     return fig
 
 
-def build_trajectory_chart(df: pd.DataFrame, lat_col: str, lon_col: str,
-                           title: str = "Drift Trajectory") -> go.Figure:
-    """Build a Plotly XY trajectory chart (lon vs lat) for PDF export.
+def build_trajectory_image(df: pd.DataFrame, lat_col: str, lon_col: str,
+                           title: str = "Drift Trajectory",
+                           width: int = 1000, height: int = 600) -> bytes | None:
+    """Build a trajectory map image with real map tiles (OSM via staticmap).
 
-    Uses a regular scatter plot (no map tiles) so kaleido can render it
-    without network access.
+    Returns PNG bytes on success, or None if tile download fails.
+    Falls back gracefully so callers can use ``build_trajectory_chart_fallback``.
     """
     plot_df = df.copy()
     plot_df[lat_col] = pd.to_numeric(plot_df[lat_col], errors="coerce")
     plot_df[lon_col] = pd.to_numeric(plot_df[lon_col], errors="coerce")
 
-    # Remove (0,0) fixes
+    zero_mask = (plot_df[lat_col] == 0) & (plot_df[lon_col] == 0)
+    plot_df.loc[zero_mask, [lat_col, lon_col]] = np.nan
+    plot_df = plot_df.dropna(subset=[lat_col, lon_col])
+
+    if plot_df.empty:
+        return None
+
+    try:
+        from staticmap import StaticMap, Line, CircleMarker
+
+        m = StaticMap(width, height,
+                      url_template="https://server.arcgisonline.com/ArcGIS/rest/services/"
+                                   "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                      tile_size=256)
+
+        # Trajectory line  (staticmap uses (lon, lat) order)
+        coords = list(zip(plot_df[lon_col], plot_df[lat_col]))
+        if len(coords) > 1:
+            m.add_line(Line(coords, color=DEVICE_PALETTE[0], width=3))
+
+        # Point markers along the track
+        for lon, lat in coords:
+            m.add_marker(CircleMarker((lon, lat), color=DEVICE_PALETTE[0], width=4))
+
+        # Start marker (green)
+        m.add_marker(CircleMarker(coords[0], color=SUCCESS, width=14))
+        # Latest marker (red)
+        m.add_marker(CircleMarker(coords[-1], color=DANGER, width=14))
+
+        pil_img = m.render()
+
+        # Add title text overlay using PIL
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(pil_img)
+
+        # Title banner at top
+        banner_h = 36
+        draw.rectangle([(0, 0), (width, banner_h)], fill=(0, 38, 58, 200))  # PNNL_NAVY semi-transparent
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+            font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+            font_sm = font
+        draw.text((10, 8), title, fill="white", font=font)
+
+        # Legend at bottom-right
+        lx = width - 160
+        ly = height - 50
+        draw.rectangle([(lx - 5, ly - 5), (width - 5, height - 5)], fill=(255, 255, 255, 200))
+        r_s, g_s, b_s = _hex_to_rgb(SUCCESS)
+        r_d, g_d, b_d = _hex_to_rgb(DANGER)
+        draw.ellipse([(lx, ly + 2), (lx + 12, ly + 14)], fill=(r_s, g_s, b_s))
+        draw.text((lx + 18, ly), "Start", fill="black", font=font_sm)
+        draw.ellipse([(lx, ly + 22), (lx + 12, ly + 34)], fill=(r_d, g_d, b_d))
+        draw.text((lx + 18, ly + 20), "Latest", fill="black", font=font_sm)
+
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    except Exception:
+        return None
+
+
+def build_trajectory_chart_fallback(df: pd.DataFrame, lat_col: str, lon_col: str,
+                                    title: str = "Drift Trajectory") -> go.Figure | None:
+    """Fallback: Plotly XY scatter plot (no map tiles) when staticmap is unavailable."""
+    plot_df = df.copy()
+    plot_df[lat_col] = pd.to_numeric(plot_df[lat_col], errors="coerce")
+    plot_df[lon_col] = pd.to_numeric(plot_df[lon_col], errors="coerce")
+
     zero_mask = (plot_df[lat_col] == 0) & (plot_df[lon_col] == 0)
     plot_df.loc[zero_mask, [lat_col, lon_col]] = np.nan
     plot_df = plot_df.dropna(subset=[lat_col, lon_col])
@@ -160,50 +233,35 @@ def build_trajectory_chart(df: pd.DataFrame, lat_col: str, lon_col: str,
 
     fig = go.Figure()
 
-    # Trajectory line
     fig.add_trace(go.Scatter(
-        x=plot_df[lon_col],
-        y=plot_df[lat_col],
+        x=plot_df[lon_col], y=plot_df[lat_col],
         mode="lines+markers",
         line=dict(width=3, color=DEVICE_PALETTE[0]),
         marker=dict(size=5, color=DEVICE_PALETTE[0], opacity=0.6),
-        showlegend=False,
-        name="Track",
+        showlegend=False, name="Track",
     ))
-
-    # Start marker
     fig.add_trace(go.Scatter(
-        x=[plot_df[lon_col].iloc[0]],
-        y=[plot_df[lat_col].iloc[0]],
+        x=[plot_df[lon_col].iloc[0]], y=[plot_df[lat_col].iloc[0]],
         mode="markers+text",
-        marker=dict(size=16, color=SUCCESS, symbol="star", line=dict(width=1, color="white")),
-        text=["Start"],
-        textposition="top center",
+        marker=dict(size=16, color=SUCCESS, symbol="star",
+                    line=dict(width=1, color="white")),
+        text=["Start"], textposition="top center",
         textfont=dict(size=12, color=SUCCESS),
-        name="Start",
-        showlegend=True,
+        name="Start", showlegend=True,
     ))
-
-    # End marker
     fig.add_trace(go.Scatter(
-        x=[plot_df[lon_col].iloc[-1]],
-        y=[plot_df[lat_col].iloc[-1]],
+        x=[plot_df[lon_col].iloc[-1]], y=[plot_df[lat_col].iloc[-1]],
         mode="markers+text",
-        marker=dict(size=16, color=DANGER, symbol="star", line=dict(width=1, color="white")),
-        text=["Latest"],
-        textposition="top center",
+        marker=dict(size=16, color=DANGER, symbol="star",
+                    line=dict(width=1, color="white")),
+        text=["Latest"], textposition="top center",
         textfont=dict(size=12, color=DANGER),
-        name="Latest",
-        showlegend=True,
+        name="Latest", showlegend=True,
     ))
 
-    apply_plot_style(
-        fig, title=title,
-        x_title="Longitude (\u00b0)",
-        y_title="Latitude (\u00b0)",
-        height=500,
-    )
-    # Equal aspect ratio for geographic coordinates
+    apply_plot_style(fig, title=title,
+                     x_title="Longitude (\u00b0)", y_title="Latitude (\u00b0)",
+                     height=500)
     fig.update_yaxes(scaleanchor="x", scaleratio=1)
     return fig
 
@@ -497,6 +555,7 @@ def generate_report_pdf(
     period_start: str,
     period_end: str,
     chart_figures: list[tuple[str, go.Figure]],
+    trajectory_png: bytes | None = None,
     trajectory_fig: go.Figure | None = None,
     scatter_fig: go.Figure | None = None,
 ) -> bytes:
@@ -508,7 +567,8 @@ def generate_report_pdf(
     device_name : Display name for the device
     period_start / period_end : Date range strings
     chart_figures : List of (title, plotly_figure) tuples for sensor charts
-    trajectory_fig : Plotly mapbox figure for trajectory
+    trajectory_png : Pre-rendered map image bytes (from staticmap)
+    trajectory_fig : Fallback Plotly XY figure if trajectory_png is None
     scatter_fig : Plotly scatter figure for correlation plot
     """
     time_col = _find_time_col(df.copy())
@@ -528,7 +588,10 @@ def generate_report_pdf(
         pdf.add_stats_table(stats)
 
     # ── Trajectory Map ──
-    if trajectory_fig is not None:
+    if trajectory_png is not None:
+        pdf.section_title("Drift Trajectory")
+        pdf.add_chart_image(trajectory_png, width=185)
+    elif trajectory_fig is not None:
         pdf.section_title("Drift Trajectory")
         img = fig_to_png(trajectory_fig, width=1000, height=500)
         pdf.add_chart_image(img, width=185)
