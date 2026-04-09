@@ -192,7 +192,7 @@ def render_live_telemetry():
     st.markdown(f'<h4 style="color:{PNNL_BLUE};">Data</h4>', unsafe_allow_html=True)
     edited_df = st.data_editor(
         df[display_cols],
-        use_container_width=True,
+        width="stretch",
         height=500,
         disabled=[c for c in display_cols if c != "Notes"],
         hide_index=True,

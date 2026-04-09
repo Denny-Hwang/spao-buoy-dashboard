@@ -143,7 +143,7 @@ def render_archive():
 
     # Data table
     st.markdown(f'<h3 style="color:{PNNL_BLUE};">Data</h3>', unsafe_allow_html=True)
-    st.dataframe(df, use_container_width=True, height=500, hide_index=True)
+    st.dataframe(df, width="stretch", height=500, hide_index=True)
 
     # CSV export
     csv_buf = BytesIO()

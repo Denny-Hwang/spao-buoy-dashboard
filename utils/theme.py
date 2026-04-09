@@ -118,12 +118,15 @@ def inject_custom_css():
         padding-bottom: 60px !important;
     }
 
-    /* Sidebar footer — responsive width */
+    /* Contain sidebar so fixed footer is relative to it, not viewport */
+    section[data-testid="stSidebar"] {
+        contain: layout !important;
+    }
     .sidebar-footer {
         position: fixed;
         bottom: 0;
         left: 0;
-        width: var(--sidebar-width, 21rem);
+        right: 0;
         padding: 8px 12px;
         border-top: 1px solid #DEDEDE;
         background: #FFFFFF;
@@ -137,13 +140,6 @@ def inject_custom_css():
         margin: 0;
         word-wrap: break-word;
         overflow-wrap: break-word;
-    }
-    /* On narrow/mobile viewports, match actual sidebar width */
-    @media (max-width: 768px) {
-        .sidebar-footer {
-            width: 100% !important;
-            max-width: var(--sidebar-width, 21rem);
-        }
     }
 
     /* Tab buttons (Single Decode / Batch Decode etc.) */
