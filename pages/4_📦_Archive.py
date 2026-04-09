@@ -79,6 +79,16 @@ def render_archive():
 
     # Device filter
     selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
+
+    # Reset date inputs when device selection changes
+    _prev_sel = st.session_state.get("_hist_prev_devices")
+    if _prev_sel != selected_devices:
+        st.session_state["_hist_prev_devices"] = selected_devices
+        for k in ("hist_start", "hist_start_time", "hist_end", "hist_end_time"):
+            st.session_state.pop(k, None)
+        if _prev_sel is not None:
+            st.rerun()
+
     if not selected_devices:
         st.info("Select at least one device.")
         return

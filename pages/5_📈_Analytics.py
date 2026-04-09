@@ -120,6 +120,15 @@ def render_analytics():
 
     selected_devices = st.multiselect("Select Devices", device_ids, default=device_ids)
 
+    # Reset date inputs when device selection changes
+    _prev_sel = st.session_state.get("_viz_prev_devices")
+    if _prev_sel != selected_devices:
+        st.session_state["_viz_prev_devices"] = selected_devices
+        for k in ("viz_start", "viz_start_time", "viz_end", "viz_end_time"):
+            st.session_state.pop(k, None)
+        if _prev_sel is not None:
+            st.rerun()
+
     if not selected_devices:
         st.info("Select at least one device.")
         return
