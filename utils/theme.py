@@ -96,7 +96,54 @@ def inject_custom_css():
     }
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a,
     section[data-testid="stSidebar"] nav a {
-        padding: 0.5rem 1rem !important;
+        padding: 0.4rem 1rem !important;
+    }
+
+    /* Reduce gap between branding and nav items */
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        padding-bottom: 0 !important;
+        margin-bottom: 0 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+    }
+
+    /* Ensure sidebar content doesn't get cut off — reserve space for footer */
+    section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        padding-bottom: 60px !important;
+    }
+
+    /* Sidebar footer — responsive width */
+    .sidebar-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: var(--sidebar-width, 21rem);
+        padding: 8px 12px;
+        border-top: 1px solid #DEDEDE;
+        background: #FFFFFF;
+        box-sizing: border-box;
+        z-index: 999;
+    }
+    .sidebar-footer p {
+        color: #5A5A5A;
+        font-size: 11px;
+        text-align: center;
+        margin: 0;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+    /* On narrow/mobile viewports, match actual sidebar width */
+    @media (max-width: 768px) {
+        .sidebar-footer {
+            width: 100% !important;
+            max-width: var(--sidebar-width, 21rem);
+        }
     }
 
     /* Tab buttons (Single Decode / Batch Decode etc.) */
@@ -132,23 +179,21 @@ def render_sidebar():
     if SPAO_LOGO_BASE64:
         logo_html = (
             f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" '
-            f'style="height:80px; margin-bottom:4px;">'
+            f'style="height:70px; margin-bottom:0;">'
         )
     st.sidebar.markdown(
-        '<div style="text-align:center; padding:8px 0;">'
-        '<p style="font-size:13px; color:#5A5A5A; margin:0; font-weight:600; '
+        '<div style="text-align:center; padding:4px 0 0 0; margin-bottom:0;">'
+        '<p style="font-size:12px; color:#5A5A5A; margin:0; font-weight:600; '
         'letter-spacing:3px;">PNNL</p>'
-        '<h2 style="color:#003E6B; margin:4px 0 0 0; font-size:22px; font-weight:700; '
+        '<h2 style="color:#003E6B; margin:2px 0 0 0; font-size:20px; font-weight:700; '
         'letter-spacing:1px;">SPAO BUOY</h2>'
         f'{logo_html}'
         '</div>',
         unsafe_allow_html=True,
     )
     st.sidebar.markdown(
-        '<div style="position:fixed; bottom:0; left:0; width:var(--sidebar-width, 21rem); '
-        'padding:12px 0; border-top:1px solid #DEDEDE; background:#FFFFFF;">'
-        '<p style="color:#5A5A5A; font-size:12px; text-align:center; margin:0;">'
-        'Pacific Northwest National Laboratory<br>'
+        '<div class="sidebar-footer">'
+        '<p>Pacific Northwest National Laboratory<br>'
         'DOE Water Power Technologies Office</p>'
         '</div>',
         unsafe_allow_html=True,
