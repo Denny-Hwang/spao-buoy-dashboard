@@ -72,6 +72,11 @@ with col2:
         Interactive drift trajectory maps (satellite imagery) and
         time-series sensor plots — battery, SST, pressure, humidity,
         TENG current, and more. Filter and color-code by device.
+
+        ### Report Generator
+        Generate a comprehensive single-device report with KPI summary,
+        statistics table, drift trajectory map, and sensor plots.
+        Export the full report as a **PDF** for sharing and archiving.
         """
     )
 
