@@ -13,7 +13,8 @@ st.set_page_config(
 )
 
 from utils.theme import (  # noqa: E402
-    render_header, render_footer, render_sidebar, inject_custom_css, PNNL_BLUE,
+    render_header, render_footer, render_sidebar, inject_custom_css,
+    PNNL_BLUE, SPAO_LOGO_BASE64,
 )
 
 # --- Global CSS + Sidebar ---
@@ -24,6 +25,14 @@ render_sidebar()
 render_header()
 
 # --- Intro Page ---
+if SPAO_LOGO_BASE64:
+    st.markdown(
+        f'<div style="text-align:center; padding:16px 0;">'
+        f'<img src="{SPAO_LOGO_BASE64}" alt="SPAO Logo" style="height:180px;">'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 st.markdown(
     f'<h1 style="color:{PNNL_BLUE};">Welcome</h1>',
     unsafe_allow_html=True,
