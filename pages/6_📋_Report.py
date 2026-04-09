@@ -240,7 +240,7 @@ def render_report():
         )
         st.dataframe(
             stats_df.set_index("Metric"),
-            use_container_width=True,
+            width='stretch',
             height=min(len(stats_df) * 38 + 40, 500),
         )
     st.markdown("<br>", unsafe_allow_html=True)
@@ -324,10 +324,10 @@ def render_report():
         for i in range(0, len(sensor_items), 2):
             cols = st.columns(2)
             with cols[0]:
-                st.plotly_chart(sensor_items[i][1], use_container_width=True)
+                st.plotly_chart(sensor_items[i][1], width='stretch')
             if i + 1 < len(sensor_items):
                 with cols[1]:
-                    st.plotly_chart(sensor_items[i + 1][1], use_container_width=True)
+                    st.plotly_chart(sensor_items[i + 1][1], width='stretch')
 
         # ── 5. Pressure vs SST Scatter ──
         pres_col = _find_sensor_col(plot_df, ["pressure"])
@@ -344,7 +344,7 @@ def render_report():
                 "Pressure vs SST", "\u00b0C", "psi",
             )
             if scatter_fig is not None:
-                st.plotly_chart(scatter_fig, use_container_width=True)
+                st.plotly_chart(scatter_fig, width='stretch')
     else:
         chart_figs = []
         scatter_fig = None
