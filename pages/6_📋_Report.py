@@ -52,7 +52,8 @@ except Exception as e:
 
 try:
     from utils.report_pdf import (
-        build_sensor_chart, build_trajectory_chart, build_scatter_chart,
+        build_sensor_chart, build_scatter_chart,
+        build_trajectory_image, build_trajectory_chart_fallback,
         compute_statistics, compute_kpis,
         generate_report_pdf, REPORT_SENSORS,
         _find_col, _find_time_col,
@@ -356,22 +357,30 @@ def render_report():
         unsafe_allow_html=True,
     )
 
-    # Build trajectory figure for PDF (Plotly mapbox version, exportable via kaleido)
-    trajectory_fig = None
-    if lat_cols and lon_cols:
-        trajectory_fig = build_trajectory_chart(
-            df, lat_cols[0], lon_cols[0], title=f"Drift Trajectory — {device_label}",
-        )
-
     if st.button("Generate PDF Report", type="primary"):
         with st.spinner("Generating PDF... (exporting charts)"):
             try:
+                # Try real map tiles first, fall back to XY scatter
+                trajectory_png = None
+                trajectory_fig = None
+                if lat_cols and lon_cols:
+                    trajectory_png = build_trajectory_image(
+                        df, lat_cols[0], lon_cols[0],
+                        title=f"Drift Trajectory \u2014 {device_label}",
+                    )
+                    if trajectory_png is None:
+                        trajectory_fig = build_trajectory_chart_fallback(
+                            df, lat_cols[0], lon_cols[0],
+                            title=f"Drift Trajectory \u2014 {device_label}",
+                        )
+
                 pdf_bytes = generate_report_pdf(
                     df=df,
                     device_name=device_label,
                     period_start=str(start_d),
                     period_end=str(end_d),
                     chart_figures=chart_figs,
+                    trajectory_png=trajectory_png,
                     trajectory_fig=trajectory_fig,
                     scatter_fig=scatter_fig,
                 )
