@@ -301,12 +301,28 @@ def render_report():
             unsafe_allow_html=True,
         )
 
+        show_ec_salinity_report = st.toggle(
+            "Show EC Conductivity & Salinity (sensor not mounted)",
+            value=False,
+            key="show_ec_salinity_report",
+            help="Toggle on to display EC Conductivity and Salinity plots. "
+                 "These sensors are currently not mounted, so values may be missing.",
+        )
+
         plot_df = df.dropna(subset=[time_col]).copy()
         chart_figs = []  # Collect for PDF
 
+        # Filter REPORT_SENSORS based on EC/Salinity toggle
+        active_sensors = REPORT_SENSORS
+        if not show_ec_salinity_report:
+            active_sensors = [
+                s for s in REPORT_SENSORS
+                if s[0] not in ("EC Conductivity", "Salinity")
+            ]
+
         # Build all available sensor charts
         sensor_items = []
-        for title, unit, keywords in REPORT_SENSORS:
+        for title, unit, keywords in active_sensors:
             col = _find_sensor_col(plot_df, keywords)
             if col is None:
                 continue

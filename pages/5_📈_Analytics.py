@@ -72,6 +72,280 @@ def _get_sensor_color(sensor_name: str, fallback_idx: int = 0) -> str:
     return DEVICE_PALETTE[fallback_idx % len(DEVICE_PALETTE)]
 
 
+def _find_col_by_keywords(df: pd.DataFrame, keywords: list[str]) -> str | None:
+    """Find the first column matching any of the given keywords (case-insensitive)."""
+    for c in df.columns:
+        cl = c.lower()
+        if cl.startswith("prev"):
+            continue
+        if any(kw in cl for kw in keywords):
+            return c
+    return None
+
+
+def _render_multi_y_plot(
+    df: pd.DataFrame,
+    x_var: str,
+    y_vars: list[str],
+    plot_type: str,
+    color_col: str | None,
+    dev_col: str,
+    dual_y: bool,
+) -> None:
+    """Render a Line / Scatter / Trendline plot with one or more Y-axis variables.
+
+    When ``dual_y`` is True and exactly (or more than) two Y variables are given,
+    subsequent variables after the first are drawn on a secondary right axis.
+    """
+    plot_df = df.dropna(subset=[x_var] + list(y_vars)).copy()
+    if plot_df.empty:
+        st.warning("No data available for the selected variables.")
+        return
+
+    mode = "lines+markers" if plot_type == "Line" else "markers"
+    use_dual = dual_y and len(y_vars) >= 2
+
+    fig = go.Figure()
+
+    # Determine per-series coloring
+    def _series_color(idx: int, y_name: str) -> str:
+        sensor = _get_sensor_color(y_name, fallback_idx=idx)
+        return sensor or DEVICE_PALETTE[idx % len(DEVICE_PALETTE)]
+
+    def _add_series(xvals, yvals, name, color, yaxis):
+        fig.add_trace(go.Scatter(
+            x=xvals, y=yvals,
+            mode=mode,
+            name=name,
+            line=dict(width=LINE_WIDTH, color=color),
+            marker=dict(size=MARKER_SIZE, color=color),
+            yaxis=yaxis,
+        ))
+
+    if color_col and color_col in plot_df.columns and color_col != dev_col:
+        # Color-by numeric not supported with multi-y in a clean way; fall back to device.
+        color_col = dev_col if dev_col in plot_df.columns else None
+
+    groups = None
+    if color_col and color_col in plot_df.columns:
+        groups = list(plot_df.groupby(color_col))
+
+    for yi, y_var in enumerate(y_vars):
+        yaxis = "y2" if (use_dual and yi >= 1) else "y"
+        if groups:
+            for gi, (gname, gdf) in enumerate(groups):
+                label = f"{y_var} \u2013 {gname}" if len(y_vars) > 1 else f"{gname}"
+                color = DEVICE_PALETTE[(gi + yi * 3) % len(DEVICE_PALETTE)]
+                _add_series(gdf[x_var], gdf[y_var], label, color, yaxis)
+        else:
+            color = _series_color(yi, y_var)
+            _add_series(plot_df[x_var], plot_df[y_var], y_var, color, yaxis)
+
+    # Optional trendline (simple linear on combined data for each y var)
+    if plot_type == "X-Y with Trendline":
+        x_num = pd.to_numeric(plot_df[x_var], errors="coerce")
+        for yi, y_var in enumerate(y_vars):
+            y_num = pd.to_numeric(plot_df[y_var], errors="coerce")
+            mask = x_num.notna() & y_num.notna()
+            if mask.sum() > 1:
+                coeffs = np.polyfit(x_num[mask], y_num[mask], 1)
+                x_range = np.linspace(x_num[mask].min(), x_num[mask].max(), 100)
+                yaxis = "y2" if (use_dual and yi >= 1) else "y"
+                fig.add_trace(go.Scatter(
+                    x=x_range, y=np.polyval(coeffs, x_range),
+                    mode="lines",
+                    name=f"{y_var} trend (y={coeffs[0]:.4f}x+{coeffs[1]:.4f})",
+                    line=dict(width=2, dash="dash", color="#94a3b8"),
+                    yaxis=yaxis,
+                ))
+
+    title = " & ".join(y_vars) + f" vs {x_var}"
+    y_title_primary = y_vars[0]
+    apply_plot_style(fig, title=title, x_title=x_var, y_title=y_title_primary)
+
+    if use_dual:
+        secondary_names = ", ".join(y_vars[1:])
+        fig.update_layout(
+            yaxis2=dict(
+                title=secondary_names,
+                overlaying="y",
+                side="right",
+                showgrid=False,
+            ),
+        )
+
+    st.plotly_chart(fig, width="stretch")
+
+
+def _render_binned_battery_temp(
+    df: pd.DataFrame,
+    time_col: str | None,
+    dev_col: str,
+) -> None:
+    """Render the Battery vs Internal Temperature Binned View chart."""
+    batt_col = _find_col_by_keywords(df, ["battery"])
+    temp_col = _find_col_by_keywords(df, ["internal temp", "int temp"])
+
+    if batt_col is None or temp_col is None:
+        st.warning(
+            "Could not find Battery and/or Internal Temperature columns in the data."
+        )
+        return
+
+    work = df.copy()
+    work[batt_col] = pd.to_numeric(work[batt_col], errors="coerce")
+    work[temp_col] = pd.to_numeric(work[temp_col], errors="coerce")
+    if time_col and time_col in work.columns:
+        work[time_col] = pd.to_datetime(work[time_col], errors="coerce")
+
+    # ── Controls: date range + r toggle ──
+    ctrl_cols = st.columns([1, 1, 1, 1, 1])
+    if time_col and work[time_col].notna().any():
+        data_min = work[time_col].min()
+        data_max = work[time_col].max()
+        with ctrl_cols[0]:
+            bstart = st.date_input(
+                "Start", value=data_min.date(), key="binned_start"
+            )
+        with ctrl_cols[1]:
+            bstart_t = st.time_input(
+                "Start time", value=time(0, 0), key="binned_start_t"
+            )
+        with ctrl_cols[2]:
+            bend = st.date_input(
+                "End", value=data_max.date(), key="binned_end"
+            )
+        with ctrl_cols[3]:
+            bend_t = st.time_input(
+                "End time", value=time(23, 59), key="binned_end_t"
+            )
+        start_dt = datetime.combine(bstart, bstart_t)
+        end_dt = datetime.combine(bend, bend_t)
+        mask = (work[time_col] >= pd.Timestamp(start_dt)) & (
+            work[time_col] <= pd.Timestamp(end_dt)
+        )
+        work = work[mask]
+    else:
+        st.info("No time column available — using all data.")
+
+    with ctrl_cols[4]:
+        show_r = st.toggle("Show Pearson r", value=True, key="binned_show_r")
+
+    work = work.dropna(subset=[batt_col, temp_col])
+    if work.empty:
+        st.warning("No Battery / Internal Temperature data in the selected range.")
+        return
+
+    # ── 2°C bins ──
+    x_min = float(np.floor(work[temp_col].min() / 2.0) * 2.0)
+    x_max = float(np.ceil(work[temp_col].max() / 2.0) * 2.0)
+    if x_max <= x_min:
+        x_max = x_min + 2.0
+    bins = np.arange(x_min, x_max + 2.0, 2.0)
+
+    work = work.copy()
+    work["_bin_idx"] = pd.cut(
+        work[temp_col], bins=bins, include_lowest=True, labels=False
+    )
+    grouped = (
+        work.dropna(subset=["_bin_idx"])
+        .groupby("_bin_idx")
+        .agg(
+            y_mean=(batt_col, "mean"),
+            y_std=(batt_col, "std"),
+            n=(batt_col, "count"),
+        )
+        .reset_index()
+    )
+    # Bin centers
+    grouped["x_center"] = grouped["_bin_idx"].apply(
+        lambda idx: (bins[int(idx)] + bins[int(idx) + 1]) / 2.0
+    )
+
+    # Drop bins with n <= 10
+    valid = grouped[grouped["n"] > 10].copy()
+    if valid.empty:
+        st.warning(
+            "No temperature bins have more than 10 samples. "
+            "Try widening the date range."
+        )
+        return
+
+    # Replace NaN std (single-sample bins shouldn't happen here since n>10, but be safe)
+    valid["y_std"] = valid["y_std"].fillna(0.0)
+
+    # ── Weighted linear fit on bin means ──
+    xs = valid["x_center"].values.astype(float)
+    ys = valid["y_mean"].values.astype(float)
+    ws = valid["n"].values.astype(float)
+    slope, intercept = np.polyfit(xs, ys, 1, w=ws)
+
+    # ── Pearson r on raw data ──
+    r_val = float(work[temp_col].corr(work[batt_col]))
+
+    # ── Build plot ──
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=xs,
+        y=ys,
+        error_y=dict(
+            type="data",
+            array=valid["y_std"].values,
+            visible=True,
+            thickness=1.5,
+            width=6,
+            color="#003E6B",
+        ),
+        mode="markers+text",
+        marker=dict(size=11, color="#003E6B",
+                    line=dict(width=1, color="#003E6B")),
+        text=[f"n={int(n)}" for n in valid["n"]],
+        textposition="top center",
+        textfont=dict(size=11, color="#334155"),
+        name="Bin mean \u00b1 1\u03c3",
+    ))
+
+    x_fit = np.linspace(xs.min(), xs.max(), 100)
+    y_fit = slope * x_fit + intercept
+    fig.add_trace(go.Scatter(
+        x=x_fit,
+        y=y_fit,
+        mode="lines",
+        line=dict(width=2, dash="dash", color="#C62828"),
+        name=f"Linear fit: {slope * 1000:.2f} mV/\u00b0C",
+    ))
+
+    apply_plot_style(
+        fig,
+        title="Battery vs Internal Temperature \u2014 Binned View",
+        x_title="Internal Temperature (\u00b0C)",
+        y_title="Battery Voltage (V)",
+    )
+    fig.update_yaxes(tickformat=".3f")
+    fig.update_layout(legend=dict(
+        orientation="v", yanchor="bottom", y=0.02, xanchor="right", x=0.98,
+        bgcolor="rgba(255,255,255,0.8)",
+    ))
+
+    if show_r:
+        sign = "+" if r_val >= 0 else "-"
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=0.02, y=0.98,
+            xanchor="left", yanchor="top",
+            text=f"<b>r = {sign}{abs(r_val):.3f}</b>",
+            showarrow=False,
+            font=dict(size=15, color="#C62828"),
+            bordercolor="#C62828",
+            borderwidth=2,
+            borderpad=6,
+            bgcolor="white",
+        )
+
+    st.plotly_chart(fig, width="stretch")
+
+
 def render_analytics():
     if not SHEETS_AVAILABLE:
         render_error(
@@ -255,6 +529,14 @@ def render_analytics():
 
             _skip = {"Device", "Device Tab", "IMEI"}
 
+            show_ec_salinity = st.toggle(
+                "Show EC Conductivity & Salinity (sensor not mounted)",
+                value=False,
+                key="show_ec_salinity_analytics",
+                help="Toggle on to display EC Conductivity and Salinity plots. "
+                     "These sensors are currently not mounted, so values may be missing.",
+            )
+
             sensor_configs = [
                 ("Battery", "V", ["battery"]),
                 ("SST", "\u00b0C", ["sst", "ocean temp"]),
@@ -267,6 +549,12 @@ def render_analytics():
                 ("Prev Oper Time", "s", ["prev oper time"]),
                 ("SuperCap Voltage", "V", ["supercap"]),
             ]
+
+            if not show_ec_salinity:
+                sensor_configs = [
+                    cfg for cfg in sensor_configs
+                    if cfg[0] not in ("EC Conductivity", "Salinity")
+                ]
 
             for title, unit, keywords in sensor_configs:
                 matching = [c for c in plot_base.columns
@@ -298,6 +586,23 @@ def render_analytics():
                     sensor_color = _get_sensor_color(title)
                     y_label = f"{y_col} ({unit})" if unit else y_col
                     apply_plot_style(fig, title=title, x_title=time_col, y_title=y_label)
+
+                    # Battery-specific styling: show nominal 3.2 V reference
+                    # and force y-axis minimum to 3.2 V by default (avoid over-zoom).
+                    if title == "Battery":
+                        y_max = float(plot_df[y_col].max())
+                        fig.update_yaxes(range=[3.2, max(y_max + 0.02, 3.4)])
+                        fig.add_hline(
+                            y=3.2,
+                            line_dash="dash",
+                            line_color="#C62828",
+                            line_width=1.5,
+                            annotation_text="Nominal 3.2 V",
+                            annotation_position="bottom right",
+                            annotation_font_size=11,
+                            annotation_font_color="#C62828",
+                        )
+
                     st.plotly_chart(fig, width="stretch")
 
             pres_cols = [c for c in plot_base.columns if "pressure" in c.lower()]
@@ -365,49 +670,84 @@ def render_analytics():
 
     # --- Custom Plot ---
     with tab_custom:
-        numeric_cols = all_df.select_dtypes(include="number").columns.tolist()
-        all_cols = all_df.columns.tolist()
+        # Metadata fields that are not meaningful to chart.
+        _custom_skip = {
+            "Device", "Device Tab", "IMEI", "Transmit Time",
+            "MOMSN", "Packet Ver", "Bytes", "CRC Valid", "Raw Hex",
+            "Notes", "Decode Error", "Warning",
+        }
+
+        numeric_cols = [
+            c for c in all_df.select_dtypes(include="number").columns.tolist()
+            if c not in _custom_skip
+        ]
+        all_cols = [c for c in all_df.columns.tolist() if c not in _custom_skip]
+
+        BINNED_PLOT = "Battery vs Internal Temperature \u2014 Binned View"
+        plot_types = [
+            "Line", "Scatter", "X-Y with Trendline", "3D Scatter", BINNED_PLOT,
+        ]
 
         if not numeric_cols:
             st.warning("No numeric columns available for plotting.")
         else:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                x_var = st.selectbox("X-axis", all_cols, key="custom_x")
-            with c2:
-                y_var = st.selectbox("Y-axis", numeric_cols, key="custom_y",
-                                     index=min(1, len(numeric_cols) - 1))
-            with c3:
-                z_var = st.selectbox("Z-axis (3D only)", ["None"] + numeric_cols, key="custom_z")
+            plot_type = st.selectbox("Plot Type", plot_types, key="custom_plot_type")
 
-            c4, c5 = st.columns(2)
-            with c4:
-                plot_type = st.selectbox("Plot Type", ["Line", "Scatter", "X-Y with Trendline", "3D Scatter"])
-            with c5:
-                color_options = ["None", dev_col] + [c for c in numeric_cols if c != dev_col]
-                color_var = st.selectbox("Color By", color_options, key="custom_color")
+            if plot_type == BINNED_PLOT:
+                _render_binned_battery_temp(all_df, time_col, dev_col)
+            else:
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    x_var = st.selectbox("X-axis", all_cols, key="custom_x")
+                with c2:
+                    default_y = numeric_cols[:1] if numeric_cols else []
+                    y_vars = st.multiselect(
+                        "Y-axis (select one or more)",
+                        numeric_cols,
+                        default=default_y,
+                        key="custom_y_multi",
+                    )
+                with c3:
+                    z_var = st.selectbox(
+                        "Z-axis (3D only)", ["None"] + numeric_cols, key="custom_z"
+                    )
 
-            color_col = color_var if color_var != "None" else None
+                c4, c5, c6 = st.columns(3)
+                with c4:
+                    dual_y = st.toggle(
+                        "Dual Y-axis",
+                        value=False,
+                        key="custom_dual_y",
+                        help="When enabled and you select 2+ Y variables, the "
+                             "second variable is drawn on a secondary right-hand axis.",
+                    )
+                with c5:
+                    color_options = ["None", dev_col] + [c for c in numeric_cols if c != dev_col]
+                    color_var = st.selectbox("Color By", color_options, key="custom_color")
+                with c6:
+                    st.write("")  # spacer
 
-            if st.button("Generate Plot", type="primary"):
-                plot_df = all_df.dropna(subset=[x_var, y_var])
+                color_col = color_var if color_var != "None" else None
 
-                if plot_type == "Line":
-                    fig = make_time_series(plot_df, x_var, y_var, color_col=color_col)
-                    st.plotly_chart(fig, width="stretch")
-                elif plot_type == "Scatter":
-                    fig = make_scatter(plot_df, x_var, y_var, color_col=color_col)
-                    st.plotly_chart(fig, width="stretch")
-                elif plot_type == "X-Y with Trendline":
-                    fig = make_scatter(plot_df, x_var, y_var, color_col=color_col, trendline=True)
-                    st.plotly_chart(fig, width="stretch")
-                elif plot_type == "3D Scatter":
-                    if z_var == "None":
-                        st.warning("Select a Z-axis variable for 3D scatter.")
+                if st.button("Generate Plot", type="primary"):
+                    if not y_vars:
+                        st.warning("Select at least one Y-axis variable.")
+                    elif plot_type == "3D Scatter":
+                        if z_var == "None":
+                            st.warning("Select a Z-axis variable for 3D scatter.")
+                        else:
+                            y_var = y_vars[0]
+                            plot_df = all_df.dropna(subset=[x_var, y_var, z_var])
+                            fig = make_3d_scatter(
+                                plot_df, x_var, y_var, z_var, color_col=color_col
+                            )
+                            st.plotly_chart(fig, width="stretch")
                     else:
-                        plot_df = plot_df.dropna(subset=[z_var])
-                        fig = make_3d_scatter(plot_df, x_var, y_var, z_var, color_col=color_col)
-                        st.plotly_chart(fig, width="stretch")
+                        _render_multi_y_plot(
+                            all_df, x_var, y_vars, plot_type,
+                            color_col=color_col, dev_col=dev_col,
+                            dual_y=dual_y,
+                        )
 
 
 render_analytics()
