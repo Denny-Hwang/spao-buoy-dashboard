@@ -188,6 +188,17 @@ def render_live_telemetry():
     # Columns to display
     display_cols = [c for c in df.columns if c not in ("_sheet_row", "Device Tab")]
 
+    # Snapshot absolute sheet-row numbers as a plain list BEFORE the
+    # data_editor call. This avoids any edge case where ``_sheet_row``
+    # would no longer be a column on ``df`` at save time (e.g. after a
+    # rerun that re-filters the DataFrame) and decouples the save loop
+    # from DataFrame column lookups.
+    sheet_row_list: list[int] = (
+        df["_sheet_row"].astype(int).tolist()
+        if "_sheet_row" in df.columns
+        else []
+    )
+
     # Inline editable data table
     st.markdown(f'<h4 style="color:{PNNL_BLUE};">Data</h4>', unsafe_allow_html=True)
     edited_df = st.data_editor(
@@ -206,16 +217,22 @@ def render_live_telemetry():
         changed_mask = original_notes.values != edited_notes.values
         if changed_mask.any():
             if st.button("Save Notes", type="primary"):
-                saved = 0
-                for i in range(len(df)):
-                    if changed_mask[i]:
-                        sheet_row = int(df.iloc[i]["_sheet_row"])
-                        new_note = str(edited_notes.iloc[i])
-                        if update_note(selected_tab, sheet_row, new_note):
-                            saved += 1
-                if saved:
-                    st.success(f"Saved {saved} note(s)!")
-                    st.rerun()
+                if not sheet_row_list or len(sheet_row_list) != len(df):
+                    st.error(
+                        "Cannot save notes: internal sheet-row mapping is "
+                        "unavailable. Click 'Refresh Data' and try again."
+                    )
+                else:
+                    saved = 0
+                    for i in range(len(df)):
+                        if changed_mask[i]:
+                            sheet_row = sheet_row_list[i]
+                            new_note = str(edited_notes.iloc[i])
+                            if update_note(selected_tab, sheet_row, new_note):
+                                saved += 1
+                    if saved:
+                        st.success(f"Saved {saved} note(s)!")
+                        st.rerun()
 
     # CSV download
     csv_buf = BytesIO()
