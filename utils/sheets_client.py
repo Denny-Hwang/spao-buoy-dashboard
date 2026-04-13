@@ -101,7 +101,7 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
     rows: list[dict] = []
     headers = list(records[0].keys()) if records else []
 
-    for record in records:
+    for idx, record in enumerate(records):
         # ── Extract hex payload & metadata per format ──
         if format_type == "rockblock_csv":
             hex_col = _find_hex_column(headers)
@@ -132,6 +132,9 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
         result = auto_detect_and_decode(hex_str)
 
         row: dict = {
+            # Absolute 1-indexed worksheet row (header is row 1, first data row is 2).
+            # Preserved through filtering/sorting so writes target the correct cell.
+            "_sheet_row": idx + 2,
             "Timestamp": timestamp,
             "Device": device,
             "MOMSN": momsn,
@@ -197,9 +200,12 @@ def read_and_decode_sheet(worksheet) -> pd.DataFrame:
 
     # Completely unknown — return as-is
     df = pd.DataFrame(records)
+    # Absolute 1-indexed worksheet row (header row 1 → first data row 2).
+    df["_sheet_row"] = range(2, len(df) + 2)
     for col in df.columns:
-        if col != "Notes":
-            df[col] = pd.to_numeric(df[col], errors="ignore")
+        if col == "Notes" or col == "_sheet_row":
+            continue
+        df[col] = pd.to_numeric(df[col], errors="ignore")
     return reorder_columns(df)
 
 
@@ -308,8 +314,12 @@ def format_device_label(device_id: str, nicknames: dict[str, str]) -> str:
     return f"{nick} ({device_id})" if nick else device_id
 
 
-def update_note(tab_name: str, row_index: int, note_text: str, sheet_id: str = SHEET_ID) -> bool:
-    """Write a note to the Notes column for a specific row."""
+def update_note(tab_name: str, sheet_row: int, note_text: str, sheet_id: str = SHEET_ID) -> bool:
+    """Write a note to the Notes column for a specific row.
+
+    ``sheet_row`` is the absolute 1-indexed worksheet row (header is row 1,
+    first data row is 2) as captured in the ``_sheet_row`` column.
+    """
     try:
         spreadsheet = _open_sheet(sheet_id)
         worksheet = spreadsheet.worksheet(tab_name)
@@ -319,7 +329,6 @@ def update_note(tab_name: str, row_index: int, note_text: str, sheet_id: str = S
             worksheet.update_cell(1, notes_col, "Notes")
         else:
             notes_col = headers.index("Notes") + 1
-        sheet_row = row_index + 2
         worksheet.update_cell(sheet_row, notes_col, note_text)
         get_device_data.clear()
         get_all_data.clear()
