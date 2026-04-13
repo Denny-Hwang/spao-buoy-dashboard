@@ -228,9 +228,22 @@ def list_device_tabs(sheet_id: str = SHEET_ID) -> list[str]:
         return []
 
 
+# Bump this when the cached DataFrame schema emitted by
+# ``normalize_sheet_data`` / ``read_and_decode_sheet`` changes. The value
+# is passed as an argument to the cached functions so that Streamlit's
+# ``@st.cache_data`` keyspace changes and stale entries from previous
+# deployments are not served after an update.
+SCHEMA_VERSION = "2025-01-sheet-row"
+
+
 @st.cache_data(ttl=120)
-def get_device_data(tab_name: str, sheet_id: str = SHEET_ID) -> pd.DataFrame:
+def get_device_data(
+    tab_name: str,
+    sheet_id: str = SHEET_ID,
+    schema_version: str = SCHEMA_VERSION,
+) -> pd.DataFrame:
     """Return all rows for a device tab as a DataFrame, auto-detecting format."""
+    del schema_version  # only used to key the cache
     try:
         spreadsheet = _open_sheet(sheet_id)
         worksheet = spreadsheet.worksheet(tab_name)
@@ -244,8 +257,12 @@ def get_device_data(tab_name: str, sheet_id: str = SHEET_ID) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=120)
-def get_all_data(sheet_id: str = SHEET_ID) -> pd.DataFrame:
+def get_all_data(
+    sheet_id: str = SHEET_ID,
+    schema_version: str = SCHEMA_VERSION,
+) -> pd.DataFrame:
     """Merge all device tabs into a single DataFrame with a 'Device Tab' column."""
+    del schema_version  # only used to key the cache
     tabs = list_device_tabs(sheet_id)
     frames = []
     for tab in tabs:
