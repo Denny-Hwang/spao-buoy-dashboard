@@ -537,6 +537,19 @@ def render_analytics():
                      "These sensors are currently not mounted, so values may be missing.",
             )
 
+            battery_nominal = st.number_input(
+                "Battery nominal voltage (V)",
+                min_value=0.0,
+                max_value=10.0,
+                value=3.2,
+                step=0.1,
+                format="%.2f",
+                key="battery_nominal_v",
+                help="Reference line drawn on the Battery plot. The y-axis lower "
+                     "bound defaults to this value, but auto-zooms out if the "
+                     "data goes below it (e.g. FY25 battery chemistry).",
+            )
+
             sensor_configs = [
                 ("Battery", "V", ["battery"]),
                 ("SST", "\u00b0C", ["sst", "ocean temp"]),
@@ -587,17 +600,24 @@ def render_analytics():
                     y_label = f"{y_col} ({unit})" if unit else y_col
                     apply_plot_style(fig, title=title, x_title=time_col, y_title=y_label)
 
-                    # Battery-specific styling: show nominal 3.2 V reference
-                    # and force y-axis minimum to 3.2 V by default (avoid over-zoom).
+                    # Battery-specific styling: draw the configured nominal
+                    # voltage reference line and anchor the y-axis to it by
+                    # default, but auto-zoom out if any data goes below it
+                    # (e.g. FY25 cells discharging well under 3.2 V).
                     if title == "Battery":
                         y_max = float(plot_df[y_col].max())
-                        fig.update_yaxes(range=[3.2, max(y_max + 0.02, 3.4)])
+                        y_min_data = float(plot_df[y_col].min())
+                        # Small cosmetic margin under the nominal line.
+                        bottom_margin = 0.02
+                        y_lower = min(battery_nominal, y_min_data) - bottom_margin
+                        y_upper = max(y_max + 0.02, battery_nominal + 0.2)
+                        fig.update_yaxes(range=[y_lower, y_upper])
                         fig.add_hline(
-                            y=3.2,
+                            y=battery_nominal,
                             line_dash="dash",
                             line_color="#C62828",
                             line_width=1.5,
-                            annotation_text="Nominal 3.2 V",
+                            annotation_text=f"Nominal {battery_nominal:.2f} V",
                             annotation_position="bottom right",
                             annotation_font_size=11,
                             annotation_font_color="#C62828",
