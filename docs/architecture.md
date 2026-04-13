@@ -89,7 +89,7 @@ User opens page
 User edits "Notes" cell in data editor
   → Click "Save Notes"
   → Detect changed rows by comparing with original
-  → update_note(tab, row_index, note_text)
+  → update_note(tab, sheet_row, note_text)
       → Find "Notes" column index in sheet
       → worksheet.update_cell(row, col, text)
   → Clear all caches

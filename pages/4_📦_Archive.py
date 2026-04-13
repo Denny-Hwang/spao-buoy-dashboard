@@ -110,13 +110,13 @@ def render_archive():
 
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
-                    start = st.date_input("Start", value=data_min.date(), key="hist_start")
+                    start = st.date_input("Start", key="hist_start")
                 with c2:
-                    start_t = st.time_input("Start time", value=time(0, 0), key="hist_start_time")
+                    start_t = st.time_input("Start time", key="hist_start_time")
                 with c3:
-                    end = st.date_input("End", value=data_max.date(), key="hist_end")
+                    end = st.date_input("End", key="hist_end")
                 with c4:
-                    end_t = st.time_input("End time", value=time(23, 59), key="hist_end_time")
+                    end_t = st.time_input("End time", key="hist_end_time")
                 start_dt = datetime.combine(start, start_t)
                 end_dt = datetime.combine(end, end_t)
                 mask = (df[time_col] >= pd.Timestamp(start_dt)) & (df[time_col] <= pd.Timestamp(end_dt))

@@ -151,8 +151,8 @@ def render_live_telemetry():
     if time_col:
         df = df.sort_values(time_col, ascending=False)
 
-    # Save original sheet row index then reset
-    df["_sheet_row"] = df.index
+    # ``_sheet_row`` is already set by normalize_sheet_data as the absolute
+    # 1-indexed worksheet row; reset positional index for display only.
     df = df.reset_index(drop=True)
 
     # Reorder columns (hex last)
