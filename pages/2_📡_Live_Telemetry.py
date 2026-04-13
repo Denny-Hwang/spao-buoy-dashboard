@@ -68,6 +68,16 @@ def render_live_telemetry():
         render_empty_state("No data available", "Device tabs exist but contain no decoded data.")
         return
 
+    # Auto-recover from a stale cache left over from a previous deployment
+    # whose DataFrame schema lacked the internal ``_sheet_row`` column.
+    # Clear caches once and rerun; guard prevents infinite loops if the
+    # column genuinely cannot be produced.
+    if any("_sheet_row" not in f.columns for f in frames):
+        if not st.session_state.get("_sheet_row_recovered"):
+            st.session_state["_sheet_row_recovered"] = True
+            st.cache_data.clear()
+            st.rerun()
+
     all_data = pd.concat(frames, ignore_index=True)
     dev_col = get_device_column(all_data) or "Device Tab"
     device_ids = get_device_ids(all_data)
