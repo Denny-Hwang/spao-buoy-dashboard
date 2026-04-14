@@ -121,6 +121,55 @@ class _StreamlitStub(types.ModuleType):
         self.tabs = _tabs
         self.columns = _columns
 
+        # Input widgets return sensible default values so page code
+        # that later does int()/float()/bool() on them still works.
+        def _radio(label, options=None, *, index=0, **_k):
+            opts = list(options or [])
+            if not opts:
+                return None
+            idx = 0
+            try:
+                idx = int(index)
+            except Exception:
+                idx = 0
+            return opts[min(max(idx, 0), len(opts) - 1)]
+
+        def _selectbox(label, options=None, *, index=0, **_k):
+            return _radio(label, options, index=index)
+
+        def _multiselect(label, options=None, *, default=None, **_k):
+            if default is not None:
+                return list(default)
+            return list(options or [])
+
+        def _checkbox(*_a, value=False, **_k):
+            return bool(value)
+
+        def _slider(*_a, value=0, **_k):
+            return value
+
+        def _number_input(*_a, value=0, **_k):
+            return value
+
+        def _text_input(*_a, value="", **_k):
+            return value
+
+        def _date_input(*_a, value=None, **_k):
+            return value
+
+        def _button(*_a, **_k):
+            return False
+
+        self.radio = _radio
+        self.selectbox = _selectbox
+        self.multiselect = _multiselect
+        self.checkbox = _checkbox
+        self.slider = _slider
+        self.number_input = _number_input
+        self.text_input = _text_input
+        self.date_input = _date_input
+        self.button = _button
+
     def __getattr__(self, name):
         # Only called when attribute is NOT already set on the instance.
         obj = _MagicObj()
@@ -133,26 +182,29 @@ def _install_stub_modules() -> None:
     if not isinstance(sys.modules.get("streamlit"), _StreamlitStub):
         sys.modules["streamlit"] = _StreamlitStub()
 
-    # gspread + google.oauth2.service_account for sheets_client import.
+    # Only stub modules that are NOT actually installed. Stubbing a real
+    # dependency (plotly, scipy, …) would break the panel builders that
+    # rely on its real API.
     stub_names = [
         "gspread",
         "gspread.exceptions",
         "google",
         "google.oauth2",
         "google.oauth2.service_account",
-        "plotly",
-        "plotly.graph_objects",
-        "plotly.express",
         "folium",
         "streamlit_folium",
         "fpdf",
         "staticmap",
     ]
+    import importlib.util
     for name in stub_names:
-        if name not in sys.modules:
-            mod = types.ModuleType(name)
-            mod.__getattr__ = lambda _n: _MagicObj()  # type: ignore[attr-defined]
-            sys.modules[name] = mod
+        if name in sys.modules:
+            continue
+        if importlib.util.find_spec(name) is not None:
+            continue  # real module available, do not stub
+        mod = types.ModuleType(name)
+        mod.__getattr__ = lambda _n: _MagicObj()  # type: ignore[attr-defined]
+        sys.modules[name] = mod
 
     # gspread.exceptions needs a WorksheetNotFound class for `except` clauses.
     gspread_exc = sys.modules["gspread.exceptions"]
