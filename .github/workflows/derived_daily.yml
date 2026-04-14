@@ -1,0 +1,57 @@
+name: Derived Daily Aggregation
+
+on:
+  schedule:
+    - cron: '0 8 * * *'          # 30 min after daily enrichment at 07:30
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Inclusive start date (YYYY-MM-DD); blank = last 7 days'
+        required: false
+        default: ''
+      end_date:
+        description: 'Inclusive end date (YYYY-MM-DD); blank = today'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Compute without writing to Sheets'
+        default: 'false'
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements-cron.txt
+      - name: Run derived-daily aggregation
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          START_FLAG=""
+          if [ -n "${{ github.event.inputs.start_date }}" ]; then
+            START_FLAG="--start-date ${{ github.event.inputs.start_date }}"
+          fi
+          END_FLAG=""
+          if [ -n "${{ github.event.inputs.end_date }}" ]; then
+            END_FLAG="--end-date ${{ github.event.inputs.end_date }}"
+          fi
+          python scripts/compute_daily_derived.py \
+            $DRY_FLAG $START_FLAG $END_FLAG --verbose | tee derived_daily.log
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: derived-daily-log
+          path: derived_daily.log
+          if-no-files-found: ignore
