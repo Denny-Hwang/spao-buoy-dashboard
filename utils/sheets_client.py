@@ -354,3 +354,19 @@ def update_note(tab_name: str, sheet_row: int, note_text: str, sheet_id: str = S
     except Exception as e:
         st.error(f"Failed to update note: {e}")
         return False
+
+
+def apply_p2_column_filter(df):
+    """Phase 2: drop enriched columns when the user toggle is off.
+
+    Safe no-op when called outside a Streamlit context or before the
+    Phase 2 schema is available.
+    """
+    try:
+        import streamlit as st
+        from utils.p2.schema import ENRICH_COLUMN_ORDER
+        if not st.session_state.get("p2_show_enriched", False):
+            return df.drop(columns=[c for c in ENRICH_COLUMN_ORDER if c in df.columns])
+    except Exception:
+        pass
+    return df

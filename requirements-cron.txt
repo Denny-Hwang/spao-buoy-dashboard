@@ -1,0 +1,8 @@
+-r requirements.txt
+requests>=2.31
+xarray>=2024.1
+netCDF4>=1.6
+copernicusmarine>=1.2
+pyarrow>=15.0
+gspread>=5.12
+google-auth>=2.27

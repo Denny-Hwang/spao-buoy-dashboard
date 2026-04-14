@@ -124,6 +124,38 @@ For detailed architecture documentation, see the [docs/](docs/) folder.
 
 ---
 
+## Phase 2 — Scientific analysis (in progress)
+
+Phase 2 extends the operational dashboard with cron-enriched scientific
+analysis pages. Phase 1 pages (1–6) remain untouched and the new pages
+are hidden behind the sidebar toggle **"Show Phase 2 enriched columns"**
+(default off), so the operational view is unchanged.
+
+**Phase 2 pages (skeleton — full implementation lands in follow-up PRs):**
+
+- `7_🔋_TENG_Performance.py` — harvested energy vs. sea state
+- `8_🌊_SST_Validation.py` — buoy SST vs. OISST / MUR / OSTIA / ERA5
+- `9_🧭_Drift_Dynamics.py` — wind- and current-driven drift decomposition
+- `10_📡_Data_Enrichment.py` — enrichment coverage and status
+
+**Enrichment pipeline.** GitHub Actions workflows run on a schedule and
+write enriched columns back into the same Google Sheet, so the Streamlit
+app never calls external APIs at request time:
+
+- `.github/workflows/enrichment_hourly.yml` — Open-Meteo Marine / Historical (every hour at :15)
+- `.github/workflows/enrichment_daily.yml` — NOAA OISST, MUR, OSTIA, OSCAR, OSI SAF sea ice (07:30 UTC)
+
+**Required GitHub Actions secrets:**
+`GCP_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_ID`,
+`COPERNICUS_USERNAME`, `COPERNICUS_PASSWORD`.
+
+Streamlit secrets are unchanged — only `gcp_service_account` is used by
+the running app.
+
+See [CLAUDE.md](CLAUDE.md) for the project-wide Phase 2 context.
+
+---
+
 ## Deployment
 
 ### Streamlit Community Cloud (Recommended)

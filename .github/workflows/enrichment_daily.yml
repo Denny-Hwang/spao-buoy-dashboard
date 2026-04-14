@@ -1,0 +1,28 @@
+name: Daily Enrichment (Satellite)
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run without writing to Sheets'
+        default: 'true'
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements-cron.txt
+      - env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+        run: python scripts/backfill_enrichment.py --sources noaa_oisst,mur_sst,ostia,oscar,osi_saf_seaice --dry-run
