@@ -309,6 +309,19 @@ def render_report():
                  "These sensors are currently not mounted, so values may be missing.",
         )
 
+        battery_nominal_report = st.number_input(
+            "Battery nominal voltage (V)",
+            min_value=0.0,
+            max_value=10.0,
+            value=3.2,
+            step=0.1,
+            format="%.2f",
+            key="battery_nominal_v_report",
+            help="Reference line drawn on the Battery plot. The y-axis lower "
+                 "bound defaults to this value, but auto-zooms out if the "
+                 "data goes below it (e.g. FY25 battery chemistry).",
+        )
+
         plot_df = df.dropna(subset=[time_col]).copy()
         chart_figs = []  # Collect for PDF
 
@@ -329,7 +342,10 @@ def render_report():
             test = pd.to_numeric(plot_df[col], errors="coerce").dropna()
             if test.empty:
                 continue
-            fig = build_sensor_chart(plot_df, time_col, col, title, unit, height=380)
+            fig = build_sensor_chart(
+                plot_df, time_col, col, title, unit, height=380,
+                battery_nominal=battery_nominal_report,
+            )
             if fig is not None:
                 sensor_items.append((title, fig))
                 chart_figs.append((title, fig))

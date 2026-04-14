@@ -104,8 +104,16 @@ def _find_time_col(df: pd.DataFrame) -> str | None:
 # ── Chart builders (for both screen and PDF) ─────────────────────────
 
 def build_sensor_chart(df: pd.DataFrame, time_col: str, y_col: str,
-                       title: str, unit: str, height: int = 400) -> go.Figure:
-    """Build a single-device time-series chart for a sensor."""
+                       title: str, unit: str, height: int = 400,
+                       battery_nominal: float | None = None) -> go.Figure:
+    """Build a single-device time-series chart for a sensor.
+
+    When ``title`` is "Battery" and ``battery_nominal`` is provided, the
+    y-axis is anchored to that nominal voltage (with auto-zoom out when the
+    data dips below it) and a dashed reference line is drawn at the nominal,
+    matching the Analytics page behavior. Other sensors keep the existing
+    mean reference line.
+    """
     fig = go.Figure()
     plot_df = df.copy()
     plot_df[y_col] = pd.to_numeric(plot_df[y_col], errors="coerce")
@@ -122,21 +130,43 @@ def build_sensor_chart(df: pd.DataFrame, time_col: str, y_col: str,
         showlegend=False,
     ))
 
-    # Add mean reference line
-    mean_val = plot_df[y_col].mean()
-    fig.add_hline(
-        y=mean_val,
-        line_dash="dash",
-        line_color="#94a3b8",
-        line_width=1.5,
-        annotation_text=f"avg: {mean_val:.2f}",
-        annotation_position="top left",
-        annotation_font_size=11,
-        annotation_font_color="#64748b",
-    )
+    is_battery = title == "Battery" and battery_nominal is not None
+
+    if not is_battery:
+        # Add mean reference line (kept for non-battery plots)
+        mean_val = plot_df[y_col].mean()
+        fig.add_hline(
+            y=mean_val,
+            line_dash="dash",
+            line_color="#94a3b8",
+            line_width=1.5,
+            annotation_text=f"avg: {mean_val:.2f}",
+            annotation_position="top left",
+            annotation_font_size=11,
+            annotation_font_color="#64748b",
+        )
 
     y_label = f"{title} ({unit})" if unit else title
     apply_plot_style(fig, title=title, x_title="", y_title=y_label, height=height)
+
+    if is_battery:
+        y_max = float(plot_df[y_col].max())
+        y_min_data = float(plot_df[y_col].min())
+        bottom_margin = 0.02
+        y_lower = min(battery_nominal, y_min_data) - bottom_margin
+        y_upper = max(y_max + 0.02, battery_nominal + 0.2)
+        fig.update_yaxes(range=[y_lower, y_upper])
+        fig.add_hline(
+            y=battery_nominal,
+            line_dash="dash",
+            line_color="#C62828",
+            line_width=1.5,
+            annotation_text=f"Nominal {battery_nominal:.2f} V",
+            annotation_position="bottom right",
+            annotation_font_size=11,
+            annotation_font_color="#C62828",
+        )
+
     return fig
 
 
