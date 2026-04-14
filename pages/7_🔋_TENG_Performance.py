@@ -137,3 +137,51 @@ st.info(
     "independently. Always pair these metrics with direct health "
     "indicators (RMS voltage, peak output)."
 )
+
+# ──────────────────────────────────────────────────────────────────────
+# Long-term trend (Derived_Daily)
+# ──────────────────────────────────────────────────────────────────────
+st.divider()
+st.subheader("Long-term trend (Derived_Daily)")
+
+
+@st.cache_data(ttl=300)
+def _load_derived_daily() -> pd.DataFrame:
+    """Read the Derived_Daily worksheet; empty DataFrame on any failure."""
+    try:
+        import os
+        from utils.p2.derived_io import read_derived_daily
+        sheet_id = (
+            st.secrets.get("GOOGLE_SHEETS_ID", None)
+            if hasattr(st, "secrets") else None
+        ) or os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            try:
+                from utils.sheets_client import SHEET_ID as _FALLBACK_ID
+                sheet_id = _FALLBACK_ID
+            except Exception:
+                sheet_id = ""
+        if not sheet_id:
+            return pd.DataFrame()
+        return read_derived_daily(sheet_id)
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Derived_Daily unavailable: {exc}")
+        return pd.DataFrame()
+
+
+daily_df = _load_derived_daily()
+if daily_df.empty:
+    st.info(
+        "Derived_Daily worksheet not yet populated. "
+        "Run the `derived_daily` GitHub Action (or `python scripts/compute_daily_derived.py`) "
+        "to generate the long-term trend table."
+    )
+else:
+    try:
+        trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
+        st.plotly_chart(
+            trend_panels.build_teng_long_trend(daily_df),
+            use_container_width=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Long-term trend rendering failed: {exc}")
