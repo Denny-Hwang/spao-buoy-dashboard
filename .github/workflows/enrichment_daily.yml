@@ -8,6 +8,14 @@ on:
       dry_run:
         description: 'Run without writing to Sheets'
         default: 'true'
+      start_date:
+        description: 'Inclusive start date (YYYY-MM-DD); blank = all missing'
+        required: false
+        default: ''
+      end_date:
+        description: 'Inclusive end date (YYYY-MM-DD); blank = now'
+        required: false
+        default: ''
 
 jobs:
   enrich:
@@ -20,9 +28,35 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - run: pip install -r requirements-cron.txt
-      - env:
+      - name: Run daily enrichment
+        id: enrich
+        env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
           COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
-        run: python scripts/backfill_enrichment.py --sources noaa_oisst,mur_sst,ostia,oscar,osi_saf_seaice --dry-run
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          START_FLAG=""
+          if [ -n "${{ github.event.inputs.start_date }}" ]; then
+            START_FLAG="--start-date ${{ github.event.inputs.start_date }}"
+          fi
+          END_FLAG=""
+          if [ -n "${{ github.event.inputs.end_date }}" ]; then
+            END_FLAG="--end-date ${{ github.event.inputs.end_date }}"
+          fi
+          python scripts/backfill_enrichment.py \
+            --sources noaa_oisst,mur_sst,ostia,oscar,osi_saf_seaice \
+            $DRY_FLAG $START_FLAG $END_FLAG \
+            | tee enrichment_daily.log
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrichment-daily-log
+          path: enrichment_daily.log
+          if-no-files-found: ignore
