@@ -26,7 +26,14 @@ def _load_module_from_path(path: Path, mod_name: str) -> types.ModuleType:
     assert spec is not None and spec.loader is not None, f"cannot spec {path}"
     module = importlib.util.module_from_spec(spec)
     sys.modules[mod_name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        # Pages may call st.stop() when data is missing; under the stub
+        # that raises a sentinel exception which we treat as a valid
+        # early return.
+        if type(exc).__name__ != "_StreamlitStop":
+            raise
     return module
 
 
@@ -120,6 +127,16 @@ class _StreamlitStub(types.ModuleType):
 
         self.tabs = _tabs
         self.columns = _columns
+
+        # st.stop() must actually halt page execution; we use a sentinel
+        # exception that the test harness catches to mark "reached stop".
+        class _StreamlitStop(Exception):
+            pass
+        self._StreamlitStop = _StreamlitStop  # type: ignore[attr-defined]
+
+        def _stop():
+            raise _StreamlitStop()
+        self.stop = _stop
 
         # Input widgets return sensible default values so page code
         # that later does int()/float()/bool() on them still works.
