@@ -149,7 +149,27 @@ app never calls external APIs at request time:
 `GCP_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_ID`,
 `COPERNICUS_USERNAME`, `COPERNICUS_PASSWORD`.
 
-Streamlit secrets are unchanged — only `gcp_service_account` is used by
+#### GH_DISPATCH_TOKEN
+
+Page 10 (`📡 Data Enrichment`) can dispatch the daily enrichment workflow
+from the Streamlit UI. To enable the "Trigger backfill" button, add a
+Streamlit secret named `GH_DISPATCH_TOKEN`:
+
+1. Create a **fine-grained personal access token** at
+   https://github.com/settings/tokens?type=beta.
+2. Scope it to this repository only (`Denny-Hwang/spao-buoy-dashboard`).
+3. Grant **Actions: Read and write** repository permission (this is the
+   minimum needed for `workflow_dispatch`).
+4. Copy the token into `.streamlit/secrets.toml`:
+   ```toml
+   GH_DISPATCH_TOKEN = "github_pat_...."
+   ```
+5. Restart Streamlit. The button on page 10 becomes active.
+
+Without the secret, the page renders an informational message and a
+disabled button — the scheduled cron still runs normally.
+
+Streamlit secrets are unchanged for Phase 1 — only `gcp_service_account` is used by
 the running app.
 
 See [CLAUDE.md](CLAUDE.md) for the project-wide Phase 2 context.
