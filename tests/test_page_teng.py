@@ -24,7 +24,11 @@ def _load_module_from_path(path: Path, name: str):
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        if type(exc).__name__ != "_StreamlitStop":
+            raise
     return module
 
 
