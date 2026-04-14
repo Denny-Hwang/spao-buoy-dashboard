@@ -347,6 +347,27 @@ def enrich_oscar(
     return filled
 
 
+def enrich_osi_saf_seaice(
+    df: pd.DataFrame, rows: pd.Index, ts_col: str, lat_col: str, lon_col: str
+) -> int:
+    from utils.p2.sources.osisaf import fetch_sea_ice_concentration
+    groups = _group_rows(df, rows, ts_col, lat_col, lon_col, bucket="D")
+    filled = 0
+    for (lat, lon, day), idxs in groups.items():
+        val = fetch_sea_ice_concentration(lat, lon, day.date())
+        if val is None:
+            # Treat tropics as "0% with flag set" so we don't retry forever.
+            if abs(float(lat)) < 40.0:
+                _set_cells(df, idxs, {"SEAICE_CONC_pct": 0.0})
+                _or_flag(df, idxs, EnrichFlag.SEAICE)
+                filled += len(idxs)
+            continue
+        _set_cells(df, idxs, {"SEAICE_CONC_pct": val})
+        _or_flag(df, idxs, EnrichFlag.SEAICE)
+        filled += len(idxs)
+    return filled
+
+
 def enrich_ostia(
     df: pd.DataFrame, rows: pd.Index, ts_col: str, lat_col: str, lon_col: str
 ) -> int:
@@ -388,6 +409,7 @@ def _register_default_dispatch() -> None:
     )
     SOURCE_DISPATCH["oscar"] = enrich_oscar
     SOURCE_DISPATCH["ostia"] = enrich_ostia
+    SOURCE_DISPATCH["osi_saf_seaice"] = enrich_osi_saf_seaice
 
 
 # ──────────────────────────────────────────────────────────────────────
