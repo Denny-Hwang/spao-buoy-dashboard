@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import string
 import time
 from typing import Any, Iterable
@@ -28,6 +29,9 @@ SCOPES = [
 # gspread update() API cap: ~100 rows per batch works under the
 # default 60 req/min quota. Reduce to 50 if we hit HTTP 429 in practice.
 DEFAULT_BATCH_SIZE = 100
+
+DEFAULT_EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
+_DEFAULT_SHEET_RE = re.compile(r"^Sheet\d+$")
 
 
 def load_credentials_from_env() -> Any:
@@ -86,6 +90,49 @@ def read_sheet_as_df(client, sheet_id: str, worksheet: str = "Sheet1") -> pd.Dat
     df = pd.DataFrame(records)
     df["_row"] = range(2, len(df) + 2)
     return df
+
+
+def worksheet_exists(client, sheet_id: str, worksheet: str) -> bool:
+    """Return True if *worksheet* exists in the spreadsheet."""
+    sh = client.open_by_key(sheet_id)
+    try:
+        sh.worksheet(worksheet)
+        return True
+    except Exception:
+        return False
+
+
+def list_data_worksheets(
+    client,
+    sheet_id: str,
+    exclude: set[str] | None = None,
+) -> list[str]:
+    """List worksheet tabs that look like device data sources.
+
+    Excludes Google's default ``SheetN`` tabs and internal/non-source
+    tabs such as ``_errors``, ``_devices``, and ``Derived_Daily``.
+    """
+    sh = client.open_by_key(sheet_id)
+    excluded = DEFAULT_EXCLUDED_TABS if exclude is None else exclude
+    return [
+        ws.title
+        for ws in sh.worksheets()
+        if ws.title not in excluded and not _DEFAULT_SHEET_RE.match(ws.title)
+    ]
+
+
+def resolve_source_worksheets(client, sheet_id: str, worksheet: str) -> list[str]:
+    """Resolve the set of source worksheet tabs for Phase 2 jobs.
+
+    - If ``worksheet`` exists, return it as a singleton list.
+    - If ``worksheet`` is ``Sheet1`` and missing, fall back to all
+      detected data worksheets (one tab per device).
+    """
+    if worksheet_exists(client, sheet_id, worksheet):
+        return [worksheet]
+    if worksheet == "Sheet1":
+        return list_data_worksheets(client, sheet_id)
+    return []
 
 
 def _ensure_header_columns(ws, columns: list[str]) -> dict[str, int]:
@@ -182,6 +229,9 @@ __all__ = [
     "SCOPES",
     "DEFAULT_BATCH_SIZE",
     "load_credentials_from_env",
+    "list_data_worksheets",
     "read_sheet_as_df",
+    "resolve_source_worksheets",
+    "worksheet_exists",
     "write_enrichment_columns",
 ]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from datetime import date, timedelta
 
 import numpy as np
@@ -169,17 +170,27 @@ with col3:
 GH_REPO = "Denny-Hwang/spao-buoy-dashboard"
 WORKFLOW_FILE = "enrichment_daily.yml"
 
-gh_token = None
-try:
-    gh_token = st.secrets.get("GH_DISPATCH_TOKEN")  # type: ignore[attr-defined]
-except Exception:
-    gh_token = None
+def _get_dispatch_token() -> str | None:
+    # 1) Streamlit secrets (preferred in Streamlit Cloud)
+    try:
+        tok = st.secrets.get("GH_DISPATCH_TOKEN")  # type: ignore[attr-defined]
+        if tok:
+            return str(tok).strip()
+    except Exception:
+        pass
+    # 2) Environment variable fallback (local/dev/self-hosted)
+    tok_env = os.environ.get("GH_DISPATCH_TOKEN", "").strip()
+    return tok_env or None
+
+
+gh_token = _get_dispatch_token()
 
 if not gh_token:
     st.info(
         "Manual trigger disabled — add a Streamlit secret "
         "`GH_DISPATCH_TOKEN` (fine-grained PAT with Actions: Write, "
-        f"scoped to `{GH_REPO}`) to enable the button below. See "
+        f"scoped to `{GH_REPO}`) to enable the button below. "
+        "You can also set environment variable `GH_DISPATCH_TOKEN`. See "
         "[README → GH_DISPATCH_TOKEN](../README.md#gh_dispatch_token) "
         "for setup steps."
     )

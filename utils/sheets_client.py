@@ -19,7 +19,7 @@ SCOPES = [
 ]
 # Exclude default Google Sheets tabs ("Sheet1", "Sheet2", …) and the error log
 _DEFAULT_SHEET_RE = re.compile(r"^Sheet\d*$")
-EXCLUDED_TABS = {"_errors", "_devices"}
+EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
@@ -103,6 +103,11 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
 
     for idx, record in enumerate(records):
         # ── Extract hex payload & metadata per format ──
+        passthrough_excluded = {
+            "Timestamp", "Device", "MOMSN", "Packet Ver", "Bytes",
+            "CRC Valid", "Transmit Time", "Raw Hex",
+        }
+
         if format_type == "rockblock_csv":
             hex_col = _find_hex_column(headers)
             hex_str = str(record.get(hex_col or "Payload", "")).strip()
@@ -110,18 +115,21 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
             device = str(record.get("Device", ""))
             momsn = ""
             transmit_time = ""
+            passthrough_excluded.update({"Date Time (UTC)", "Date Time", "Device", hex_col or "Payload"})
         elif format_type == "webhook_decoded":
             hex_str = str(record.get("Raw Hex", "")).strip()
             timestamp = record.get("Receive Time", "")
             device = str(record.get("IMEI", ""))
             momsn = str(record.get("MOMSN", ""))
             transmit_time = str(record.get("Transmit Time", ""))
+            passthrough_excluded.update({"Receive Time", "IMEI", "MOMSN", "Transmit Time", "Raw Hex"})
         elif format_type == "webhook_errors":
             hex_str = str(record.get("Raw Hex", "")).strip()
             timestamp = record.get("Time", "")
             device = str(record.get("IMEI", ""))
             momsn = str(record.get("MOMSN", ""))
             transmit_time = str(record.get("Transmit Time", ""))
+            passthrough_excluded.update({"Time", "IMEI", "MOMSN", "Transmit Time", "Raw Hex", "Error"})
         else:
             continue
 
@@ -160,6 +168,14 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
         # Preserve Notes column if present
         if "Notes" in record and record["Notes"]:
             row["Notes"] = record["Notes"]
+
+        # Preserve enrichment / auxiliary columns written by downstream jobs.
+        for key, value in record.items():
+            if key in passthrough_excluded or key in row:
+                continue
+            if key is None or str(key).strip() == "":
+                continue
+            row[key] = value
 
         # Raw hex last
         row["Raw Hex"] = hex_str
@@ -233,7 +249,7 @@ def list_device_tabs(sheet_id: str = SHEET_ID) -> list[str]:
 # is passed as an argument to the cached functions so that Streamlit's
 # ``@st.cache_data`` keyspace changes and stale entries from previous
 # deployments are not served after an update.
-SCHEMA_VERSION = "2025-01-sheet-row"
+SCHEMA_VERSION = "2026-04-preserve-enrichment-cols"
 
 
 @st.cache_data(ttl=120)

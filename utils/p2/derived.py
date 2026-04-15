@@ -53,11 +53,17 @@ DERIVED_DAILY_WORKSHEET = "Derived_Daily"
 
 
 _TS_ALIASES = ("Timestamp", "Receive Time", "time", "Time")
-_LAT_ALIASES = ("Lat", "Latitude", "lat")
-_LON_ALIASES = ("Lon", "Lng", "Longitude", "lon")
+_LAT_ALIASES = (
+    "Lat", "Latitude", "lat", "Lat (°)", "Latitude (°)", "Latitude (deg)",
+    "GPS Lat", "GPS_Lat", "GPS Latitude", "GPS_Latitude",
+)
+_LON_ALIASES = (
+    "Lon", "Lng", "Longitude", "lon", "Lon (°)", "Longitude (°)", "Longitude (deg)",
+    "GPS Lon", "GPS_Lon", "GPS Longitude", "GPS_Longitude",
+)
 _TX_ATTEMPTED_ALIASES = ("tx_attempted", "Transmit Attempts", "MO_Attempts")
 _TX_SUCCESS_ALIASES = ("tx_success", "Transmit Success", "CRC Valid")
-_BUOY_SST_ALIASES = ("SST_buoy", "sst_buoy", "SST", "Water Temp", "Water_Temp")
+_BUOY_SST_ALIASES = ("SST_buoy", "sst_buoy", "SST", "SST (°C)", "Water Temp", "Water_Temp")
 
 _SAT_COLUMNS = {
     "OISST":  ("SAT_SST_OISST", "SAT_SST_OISST_cC"),
