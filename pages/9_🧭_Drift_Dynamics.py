@@ -68,12 +68,23 @@ except Exception as exc:  # noqa: BLE001
     st.error(f"Toolbar unavailable: {exc}")
     st.stop()
 
-REQUIRED = ("Lat", "Lon")
-missing = [c for c in REQUIRED if c not in df.columns]
-if df.empty or missing:
+# The toolbar already canonicalizes lat/lon to "Lat"/"Lon" when a
+# recognizable variant (including FY25 "Approx Latitude" style headers)
+# is present. Fall back to the resolver explicitly in case the toolbar
+# couldn't rename for any reason.
+try:
+    from utils.p2.ui_toolbar import resolve_lat_lon_columns
+    _lat, _lon = resolve_lat_lon_columns(df)
+except Exception:
+    _lat = "Lat" if "Lat" in df.columns else None
+    _lon = "Lon" if "Lon" in df.columns else None
+
+if df.empty or _lat is None or _lon is None:
     st.warning(
-        "Drift Dynamics needs at least Lat and Lon columns. "
-        f"Missing: {missing or '(empty selection)'}."
+        "Drift Dynamics needs at least a latitude and longitude column. "
+        f"Detected: lat={_lat!r}, lon={_lon!r}. "
+        "If your sheet uses nonstandard headers, add them to the "
+        "`_LAT_ALIASES` / `_LON_ALIASES` lists in utils/p2/ui_toolbar.py."
     )
     st.stop()
 

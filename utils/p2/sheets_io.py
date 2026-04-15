@@ -34,26 +34,61 @@ DEFAULT_EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
 _DEFAULT_SHEET_RE = re.compile(r"^Sheet\d+$")
 _T = TypeVar("_T")
 
-RETRYABLE_MARKERS = ("429", "Quota exceeded", "RESOURCE_EXHAUSTED")
-DEFAULT_RETRY_DELAYS_S = (2.0, 5.0, 10.0, 20.0)
+# Substrings matched against ``str(exception)`` that indicate a transient
+# Google Sheets API error worth retrying. Two families:
+#   * 429 / quota / rate-limit  — caller-side throttling
+#   * 500 / 502 / 503 / 504     — server-side transient errors (Google
+#                                 Sheets API occasionally returns these
+#                                 for 30s – a few minutes at a time).
+RETRYABLE_MARKERS = (
+    # Rate limits
+    "429",
+    "Quota exceeded",
+    "RESOURCE_EXHAUSTED",
+    "rateLimitExceeded",
+    # Transient HTTP 5xx from Google Sheets API
+    "[500]",
+    "[502]",
+    "[503]",
+    "[504]",
+    "Service is currently unavailable",
+    "Internal error encountered",
+    "Backend Error",
+    "backendError",
+    "internalError",
+)
+
+# Longer tail so transient 5xx outages (usually < 2 min) self-heal
+# within a single job rather than killing the whole workflow. Total
+# worst-case wall time: 2+5+15+30+60 = 112 s across 5 retries.
+DEFAULT_RETRY_DELAYS_S = (2.0, 5.0, 15.0, 30.0, 60.0)
 
 
-def _is_retryable_quota_error(exc: Exception) -> bool:
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True if *exc* is a transient Google Sheets API error."""
     msg = str(exc)
     return any(marker in msg for marker in RETRYABLE_MARKERS)
 
 
+# Backwards-compatible alias — the old name survives so existing tests
+# and any out-of-tree callers keep working.
+_is_retryable_quota_error = _is_retryable_error
+
+
 def _with_quota_retries(fn: Callable[[], _T], *, op: str) -> _T:
-    """Retry Google Sheets calls on quota/rate-limit errors."""
+    """Retry Google Sheets calls on transient (quota or 5xx) errors."""
     delays = DEFAULT_RETRY_DELAYS_S
     for i in range(len(delays) + 1):
         try:
             return fn()
         except Exception as exc:
-            if not _is_retryable_quota_error(exc) or i == len(delays):
+            if not _is_retryable_error(exc) or i == len(delays):
                 raise
             delay = delays[i]
-            log.warning("sheets_io: %s hit quota limit; retrying in %.1fs", op, delay)
+            log.warning(
+                "sheets_io: %s hit transient error (%s); retrying in %.1fs",
+                op, type(exc).__name__, delay,
+            )
             time.sleep(delay)
     raise RuntimeError(f"unreachable retry loop for op={op}")
 

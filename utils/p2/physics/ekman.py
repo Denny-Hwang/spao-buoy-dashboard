@@ -33,11 +33,24 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-_LAT_ALIASES = ("Lat", "Latitude", "lat", "GPS Lat", "GPS_Lat")
-_LON_ALIASES = ("Lon", "Lng", "Longitude", "lon", "GPS Lon", "GPS_Lon")
-_TS_ALIASES = ("Timestamp", "Receive Time", "time", "Time")
+_LAT_ALIASES = (
+    "Lat", "Latitude", "lat", "Lat (°)", "Latitude (°)", "Latitude (deg)",
+    "GPS Lat", "GPS_Lat", "GPS Latitude", "GPS_Latitude",
+)
+_LON_ALIASES = (
+    "Lon", "Lng", "Longitude", "lon", "Lon (°)", "Longitude (°)", "Longitude (deg)",
+    "GPS Lon", "GPS_Lon", "GPS Longitude", "GPS_Longitude",
+)
+_TS_ALIASES = (
+    "Timestamp", "Receive Time", "Date Time (UTC)", "Date Time", "time", "Time",
+)
 _WIND_U_ALIASES = ("U10", "u_wind", "Wind_U", "WIND_U_mps")
 _WIND_V_ALIASES = ("V10", "v_wind", "Wind_V", "WIND_V_mps")
+
+# Substring fallbacks for sheets whose headers don't match any alias.
+_LAT_SUBSTRINGS = ("latitude", "lat")
+_LON_SUBSTRINGS = ("longitude", "lng", "lon")
+_LON_EXCLUDE_SUBSTRINGS = ("longevity", "long-term", "longterm")
 
 EARTH_RADIUS_M = 6_371_000.0
 
@@ -47,6 +60,32 @@ def _first(df: pd.DataFrame, aliases: Iterable[str]) -> str | None:
         if a in df.columns:
             return a
     return None
+
+
+def _first_substring(
+    df: pd.DataFrame,
+    needles: Iterable[str],
+    *,
+    exclude: Iterable[str] = (),
+) -> str | None:
+    ex = tuple(exclude)
+    for c in df.columns:
+        cl = str(c).lower()
+        if any(x in cl for x in ex):
+            continue
+        if any(n in cl for n in needles):
+            return c
+    return None
+
+
+def _resolve_lat_col(df: pd.DataFrame) -> str | None:
+    return _first(df, _LAT_ALIASES) or _first_substring(df, _LAT_SUBSTRINGS)
+
+
+def _resolve_lon_col(df: pd.DataFrame) -> str | None:
+    return _first(df, _LON_ALIASES) or _first_substring(
+        df, _LON_SUBSTRINGS, exclude=_LON_EXCLUDE_SUBSTRINGS,
+    )
 
 
 def _latlon_to_xy(lat: np.ndarray, lon: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -68,8 +107,8 @@ def compute_drift_velocity(df: pd.DataFrame) -> pd.DataFrame:
     or non-positive dt produce NaN velocities.
     """
     out = df.copy()
-    lat_col = _first(out, _LAT_ALIASES)
-    lon_col = _first(out, _LON_ALIASES)
+    lat_col = _resolve_lat_col(out)
+    lon_col = _resolve_lon_col(out)
     ts_col = _first(out, _TS_ALIASES)
     if lat_col is None or lon_col is None or ts_col is None:
         raise ValueError(

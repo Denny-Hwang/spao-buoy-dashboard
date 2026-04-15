@@ -117,3 +117,101 @@ def test_empty_time_col_returns_empty_lists() -> None:
     df = _make_frame().drop(columns=["Timestamp"])
     assert sensor_overview.build_phase1_sensor_figures(df, "Timestamp", "Device Tab") == []
     assert sensor_overview.build_enriched_group_figures(df, "Timestamp", "Device Tab") == []
+
+
+# ---------- Dual-y axis compliance ----------------------------------
+
+def _fig_for_group_key(results, key_substring: str):
+    for title, fig, _reason in results:
+        if key_substring.lower() in title.lower():
+            return fig
+    raise AssertionError(f"no group matching {key_substring!r} in results")
+
+
+def test_wind_group_uses_dual_y_axis_separating_speed_and_direction() -> None:
+    """The original bug: Wind plot flattened the speed series because
+    direction (0-360) dominated a single axis. Verify the rebuilt
+    figure explicitly puts speed on y1 and direction on y2."""
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Wind (10 m")
+    assert fig is not None
+
+    layout = fig.layout
+    # yaxis2 must exist with overlaying="y" and side="right".
+    assert layout.yaxis2 is not None
+    assert layout.yaxis2.overlaying == "y"
+    assert layout.yaxis2.side == "right"
+
+    # Trace axis assignments: speed on y1, direction on y2.
+    speed_traces = [t for t in fig.data if "speed" in str(t.name).lower()]
+    dir_traces = [t for t in fig.data if "direction" in str(t.name).lower()]
+    assert speed_traces and dir_traces
+    assert all((t.yaxis or "y") == "y" for t in speed_traces)
+    assert all(t.yaxis == "y2" for t in dir_traces)
+
+
+def test_atmos_group_dual_y_with_pressure_and_air_temp() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Atmosphere")
+    assert fig is not None
+    assert fig.layout.yaxis2 is not None
+    pres_traces = [t for t in fig.data if "pressure" in str(t.name).lower()]
+    air_traces = [t for t in fig.data if "air temp" in str(t.name).lower()]
+    assert pres_traces and air_traces
+    assert all((t.yaxis or "y") == "y" for t in pres_traces)
+    assert all(t.yaxis == "y2" for t in air_traces)
+
+
+def test_wave_period_group_puts_direction_on_secondary_axis() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Wave period")
+    assert fig is not None
+    assert fig.layout.yaxis2 is not None
+    # Tp / Tswell (seconds) on y1, Wave dir (degrees) on y2.
+    dir_traces = [t for t in fig.data if "wave dir" in str(t.name).lower()]
+    tp_traces = [t for t in fig.data if "tp" in str(t.name).lower() and "tswell" not in str(t.name).lower()]
+    assert dir_traces and tp_traces
+    assert all(t.yaxis == "y2" for t in dir_traces)
+    assert all((t.yaxis or "y") == "y" for t in tp_traces)
+
+
+def test_sst_products_group_dual_y_linked_range() -> None:
+    """SST products share a unit (°C) so the secondary axis must be
+    range-locked to the primary (matches='y') to keep values
+    visually comparable while still satisfying the dual-y rule."""
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert fig.layout.yaxis2 is not None
+    assert fig.layout.yaxis2.matches == "y"
+
+
+def test_single_series_group_has_no_secondary_axis() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Sea-ice concentration")
+    assert fig is not None
+    # Single series → yaxis2 not configured (plotly omits the attr
+    # entirely when it hasn't been set). Use a tolerant check.
+    try:
+        overlaying = fig.layout.yaxis2.overlaying
+    except (AttributeError, KeyError):
+        overlaying = None
+    assert overlaying is None
+    # And all traces land on the primary axis.
+    for t in fig.data:
+        assert (t.yaxis or "y") == "y"

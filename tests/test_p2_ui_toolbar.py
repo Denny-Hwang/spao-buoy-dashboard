@@ -22,7 +22,9 @@ _install_stub_modules()
 
 from utils.p2.ui_toolbar import (  # noqa: E402
     apply_device_time_filter,
+    canonicalize_lat_lon,
     find_time_col,
+    resolve_lat_lon_columns,
 )
 
 
@@ -119,3 +121,73 @@ def test_apply_filter_returns_copy_not_view() -> None:
 def test_apply_filter_empty_df_passthrough() -> None:
     empty = pd.DataFrame()
     assert apply_device_time_filter(empty, [], "Device Tab", None, None, None) is empty
+
+
+# ---------- resolve_lat_lon_columns / canonicalize_lat_lon ---------
+
+def test_resolve_lat_lon_exact_alias() -> None:
+    df = pd.DataFrame({"Lat": [1.0], "Lon": [2.0]})
+    assert resolve_lat_lon_columns(df) == ("Lat", "Lon")
+
+
+def test_resolve_lat_lon_gps_variant() -> None:
+    df = pd.DataFrame({"GPS Latitude": [1.0], "GPS Longitude": [2.0]})
+    assert resolve_lat_lon_columns(df) == ("GPS Latitude", "GPS Longitude")
+
+
+def test_resolve_lat_lon_fy25_approx_style() -> None:
+    """FY25 tabs use headers that aren't in the exact alias list.
+    The substring fallback must still resolve them."""
+    df = pd.DataFrame({
+        "Approx Latitude": [58.3],
+        "Approx Longitude": [-169.9],
+        "Battery Voltage": [3.25],
+    })
+    lat, lon = resolve_lat_lon_columns(df)
+    assert lat == "Approx Latitude"
+    assert lon == "Approx Longitude"
+
+
+def test_resolve_lat_lon_excludes_long_term_tokens() -> None:
+    """Ensure substring match doesn't mistake e.g. 'long-term flag' for longitude."""
+    df = pd.DataFrame({
+        "long-term stability": [1],
+        "Latitude": [58.3],
+        "Longitude": [-169.9],
+    })
+    lat, lon = resolve_lat_lon_columns(df)
+    assert lat == "Latitude"
+    assert lon == "Longitude"
+
+
+def test_resolve_lat_lon_missing_returns_none() -> None:
+    df = pd.DataFrame({"foo": [1], "bar": [2]})
+    assert resolve_lat_lon_columns(df) == (None, None)
+
+
+def test_canonicalize_lat_lon_renames_to_canonical() -> None:
+    df = pd.DataFrame({
+        "Approx Latitude": [58.3, 58.4],
+        "Approx Longitude": [-169.9, -170.0],
+        "Battery": [3.25, 3.24],
+    })
+    out = canonicalize_lat_lon(df)
+    assert "Lat" in out.columns
+    assert "Lon" in out.columns
+    assert out["Lat"].tolist() == [58.3, 58.4]
+    assert out["Lon"].tolist() == [-169.9, -170.0]
+    # Original frame untouched.
+    assert "Lat" not in df.columns
+
+
+def test_canonicalize_lat_lon_idempotent_when_canonical_already_present() -> None:
+    df = pd.DataFrame({"Lat": [1.0], "Lon": [2.0], "extra": [0]})
+    out = canonicalize_lat_lon(df)
+    assert out is df  # no rename → same object
+
+
+def test_canonicalize_lat_lon_noop_when_lat_lon_absent() -> None:
+    df = pd.DataFrame({"foo": [1], "bar": [2]})
+    out = canonicalize_lat_lon(df)
+    # No lat/lon to rename → passthrough.
+    assert out is df
