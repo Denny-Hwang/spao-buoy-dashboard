@@ -116,6 +116,17 @@ def test_windage_columns_present_even_without_drift():
     assert daily["ekman_theta_deg"].isna().all()
 
 
+def test_compute_daily_table_accepts_degree_style_lat_lon_and_sst():
+    df = _synthetic_hourly(days=2).rename(
+        columns={"Lat": "Lat (°)", "Lon": "Lon (°)", "SST_buoy": "SST (°C)"}
+    )
+    daily = compute_daily_table(df)
+    assert len(daily) == 2
+    # Ensure aliases were recognized (distance and SST bias are computed).
+    assert (daily["drift_distance_km"] >= 0).all()
+    assert daily["sst_bias_OISST"].mean() == pytest.approx(0.10, abs=0.02)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Idempotency of write_derived_daily (via stubbed gspread worksheet)
 # ──────────────────────────────────────────────────────────────────────
