@@ -13,7 +13,20 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Drift Dynamics", page_icon="🧭", layout="wide")
-st.title("🧭 Drift Dynamics")
+
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_sidebar, inject_custom_css,
+    PNNL_BLUE,
+)
+
+inject_custom_css()
+render_sidebar()
+render_header()
+
+st.markdown(
+    f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">🧭 Drift Dynamics</h1>',
+    unsafe_allow_html=True,
+)
 
 try:
     _flag = importlib.import_module("utils.p2.__phase2_flag")
@@ -102,3 +115,5 @@ else:
         st.dataframe(table, use_container_width=True)
     st.plotly_chart(panels.build_epoch_multipanel(df), use_container_width=True)
     st.plotly_chart(panels.build_pre_during_post_box(df, var="Hs"), use_container_width=True)
+
+render_footer()

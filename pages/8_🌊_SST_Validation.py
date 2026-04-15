@@ -19,7 +19,20 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="SST Validation", page_icon="🌊", layout="wide")
-st.title("🌊 SST Validation")
+
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_sidebar, inject_custom_css,
+    PNNL_BLUE,
+)
+
+inject_custom_css()
+render_sidebar()
+render_header()
+
+st.markdown(
+    f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">🌊 SST Validation</h1>',
+    unsafe_allow_html=True,
+)
 
 try:
     _flag = importlib.import_module("utils.p2.__phase2_flag")
@@ -173,3 +186,5 @@ else:
             st.dataframe(latest, use_container_width=True)
     except Exception as exc:  # noqa: BLE001
         st.caption(f"Bias trend rendering failed: {exc}")
+
+render_footer()

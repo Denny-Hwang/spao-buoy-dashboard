@@ -22,7 +22,20 @@ except Exception:  # pragma: no cover
     requests = None  # type: ignore[assignment]
 
 st.set_page_config(page_title="Data Enrichment", page_icon="📡", layout="wide")
-st.title("📡 Data Enrichment")
+
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_sidebar, inject_custom_css,
+    PNNL_BLUE,
+)
+
+inject_custom_css()
+render_sidebar()
+render_header()
+
+st.markdown(
+    f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">📡 Data Enrichment</h1>',
+    unsafe_allow_html=True,
+)
 
 try:
     _flag = importlib.import_module("utils.p2.__phase2_flag")
@@ -265,3 +278,5 @@ if summary["n_flagged"].sum() > 0:
     offenders = flags[flags.any(axis=1)].head(50)
     if not offenders.empty:
         st.dataframe(offenders, use_container_width=True)
+
+render_footer()
