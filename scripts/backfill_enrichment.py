@@ -122,8 +122,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # DataFrame helpers
 # ──────────────────────────────────────────────────────────────────────
 _TIMESTAMP_ALIASES = ("Timestamp", "Receive Time", "Date Time (UTC)", "Date Time", "Time")
-_LAT_ALIASES = ("Lat", "Latitude", "lat", "Lat (°)", "GPS Lat", "GPS_Lat")
-_LON_ALIASES = ("Lon", "Lng", "Longitude", "lon", "Lon (°)", "GPS Lon", "GPS_Lon")
+_LAT_ALIASES = (
+    "Lat", "Latitude", "lat", "Lat (°)", "Latitude (°)", "Latitude (deg)",
+    "GPS Lat", "GPS_Lat", "GPS Latitude", "GPS_Latitude",
+)
+_LON_ALIASES = (
+    "Lon", "Lng", "Longitude", "lon", "Lon (°)", "Longitude (°)", "Longitude (deg)",
+    "GPS Lon", "GPS_Lon", "GPS Longitude", "GPS_Longitude",
+)
 
 
 def _first_alias(df: pd.DataFrame, aliases: tuple[str, ...]) -> str | None:
@@ -159,6 +165,11 @@ def _coerce_ts(val: Any) -> pd.Timestamp:
         return pd.Timestamp(val, tz="UTC") if not pd.isna(val) else pd.NaT
     except Exception:
         return pd.NaT
+
+
+def _is_missing_gps(lat: float, lon: float) -> bool:
+    """Treat (0,0) as missing GPS fix and skip enrichment for that row."""
+    return abs(lat) < 1e-9 and abs(lon) < 1e-9
 
 
 def ensure_enrichment_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -215,7 +226,7 @@ def _group_rows(
         lat = _coerce_float(df.at[idx, lat_col])
         lon = _coerce_float(df.at[idx, lon_col])
         ts = _coerce_ts(df.at[idx, ts_col])
-        if math.isnan(lat) or math.isnan(lon) or pd.isna(ts):
+        if math.isnan(lat) or math.isnan(lon) or pd.isna(ts) or _is_missing_gps(lat, lon):
             continue
         key = (snap(lat), snap(lon), time_bucket(ts, bucket))  # type: ignore[arg-type]
         groups.setdefault(key, []).append(idx)
@@ -501,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             ts_col, lat_col, lon_col = locate_geotemporal_columns(df)
         except RuntimeError as exc:
-            print(f"[error] worksheet '{tab}': {exc}", file=sys.stderr)
+            print(f"[warn] worksheet '{tab}' skipped: {exc}")
             continue
         window = filter_by_window(df, ts_col, args.start_date, args.end_date)
 

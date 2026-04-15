@@ -152,17 +152,24 @@ app never calls external APIs at request time:
 #### GH_DISPATCH_TOKEN
 
 Page 10 (`📡 Data Enrichment`) can dispatch the daily enrichment workflow
-from the Streamlit UI. To enable the "Trigger backfill" button, add a
-Streamlit secret named `GH_DISPATCH_TOKEN`:
+from the Streamlit UI. To enable the "Trigger backfill" button, provide
+`GH_DISPATCH_TOKEN` either as a **Streamlit secret** or an
+**environment variable**:
 
 1. Create a **fine-grained personal access token** at
    https://github.com/settings/tokens?type=beta.
 2. Scope it to this repository only (`Denny-Hwang/spao-buoy-dashboard`).
 3. Grant **Actions: Read and write** repository permission (this is the
    minimum needed for `workflow_dispatch`).
-4. Copy the token into `.streamlit/secrets.toml`:
+4. Provide the token via one of these methods:
    ```toml
+   # Option A: Streamlit secret
    GH_DISPATCH_TOKEN = "github_pat_...."
+   ```
+   or
+   ```bash
+   # Option B: environment variable
+   export GH_DISPATCH_TOKEN="github_pat_...."
    ```
 5. Restart Streamlit. The button on page 10 becomes active.
 
