@@ -55,12 +55,22 @@ def _load_data() -> pd.DataFrame:
 
 df = _load_data()
 
+# ── Shared device + date-range toolbar ────────────────────────────────
+try:
+    toolbar = importlib.import_module("utils.p2.ui_toolbar")
+    df, selected_devices, time_col, dev_col = toolbar.render_device_time_filter(
+        df, key_prefix="p7",
+    )
+except Exception as exc:  # noqa: BLE001
+    st.error(f"Toolbar unavailable: {exc}")
+    st.stop()
+
 REQUIRED = ("WAVE_H_cm", "WAVE_T_ds")
 missing = [c for c in REQUIRED if c not in df.columns]
 if df.empty or missing:
     st.warning(
-        "Phase 2 enrichment not yet available for this page. "
-        f"Missing columns: {missing or '(no data at all)'}. "
+        "Phase 2 enrichment not yet available for this selection. "
+        f"Missing columns: {missing or '(empty selection)'}. "
         "Trigger the `enrichment_hourly` GitHub Action to populate "
         "wave columns, then reload."
     )
@@ -85,76 +95,75 @@ col3.metric("P_TENG / P_wave", f"{kpis['ratio_pct']:.2f} %")
 st.divider()
 
 # ──────────────────────────────────────────────────────────────────────
-# A1 — Wave-to-power transfer function
+# Main-area tabs: A1 Transfer │ A4 Normalized trend │ Long-term
 # ──────────────────────────────────────────────────────────────────────
-st.subheader("A1 — Wave-to-Power Transfer Function")
-tab_hm, tab_loglog, tab_flux = st.tabs([
-    "Hs × Tp heatmap",
-    "Log-log P vs Hs²·Tp",
-    "vs theoretical flux",
+tab_a1, tab_a4, tab_long = st.tabs([
+    "A1 — Transfer function",
+    "A4 — Normalized power trend",
+    "Long-term (Derived_Daily)",
 ])
 
-with tab_hm:
-    st.plotly_chart(panels.build_hs_tp_heatmap(df), use_container_width=True)
-    st.caption(
-        f"Reference markers: Jung 2024 ({panels.JUNG_2024['P_mW']} mW, "
-        f"blue star) and Lu 2026 ({panels.LU_2026['P_mW']} mW, red star)."
+with tab_a1:
+    st.subheader("A1 — Wave-to-Power Transfer Function")
+    sub_hm, sub_loglog, sub_flux = st.tabs([
+        "Hs × Tp heatmap",
+        "Log-log P vs Hs²·Tp",
+        "vs theoretical flux",
+    ])
+    with sub_hm:
+        st.plotly_chart(panels.build_hs_tp_heatmap(df), use_container_width=True)
+        st.caption(
+            f"Reference markers: Jung 2024 ({panels.JUNG_2024['P_mW']} mW, "
+            f"blue star) and Lu 2026 ({panels.LU_2026['P_mW']} mW, red star)."
+        )
+    with sub_loglog:
+        st.plotly_chart(panels.build_loglog_hs2tp(df), use_container_width=True)
+        st.caption("Slope of ~1 indicates P_TENG scales linearly with Hs²·Tp.")
+    with sub_flux:
+        st.plotly_chart(panels.build_flux_scatter(df), use_container_width=True)
+        st.caption("Theoretical flux from Falnes (2002) Eq. 6.19 with Te = 0.9·Tp.")
+
+with tab_a4:
+    st.subheader("A4 — Normalized Power Trend")
+    level = st.radio(
+        "Normalization level",
+        options=[0, 1, 2],
+        format_func=lambda L: {0: "0 — raw mW", 1: "1 — / Hs²", 2: "2 — / (Hs²·Tp)"}[L],
+        horizontal=True,
+        index=2,
+        key="p7_norm_level",
     )
 
-with tab_loglog:
-    st.plotly_chart(panels.build_loglog_hs2tp(df), use_container_width=True)
-    st.caption("Slope of ~1 indicates P_TENG scales linearly with Hs²·Tp.")
+    trend = panels.build_eta_trend(df, level=int(level))
+    st.plotly_chart(trend["fig"], use_container_width=True)
 
-with tab_flux:
-    st.plotly_chart(panels.build_flux_scatter(df), use_container_width=True)
-    st.caption("Theoretical flux from Falnes (2002) Eq. 6.19 with Te = 0.9·Tp.")
+    badge_col, mk_col = st.columns(2)
+    if trend["mk_p"] == trend["mk_p"]:  # not NaN
+        badge_col.metric(
+            "Theil-Sen slope (per day)",
+            f"{trend['slope']:.3g}",
+        )
+        mk_col.metric(
+            "Mann-Kendall",
+            trend["mk_trend"],
+            help=f"p = {trend['mk_p']:.3g} (N = {trend['n']})",
+        )
 
-st.divider()
-
-# ──────────────────────────────────────────────────────────────────────
-# A4 — Normalized power trend
-# ──────────────────────────────────────────────────────────────────────
-st.subheader("A4 — Normalized Power Trend")
-level = st.radio(
-    "Normalization level",
-    options=[0, 1, 2],
-    format_func=lambda L: {0: "0 — raw mW", 1: "1 — / Hs²", 2: "2 — / (Hs²·Tp)"}[L],
-    horizontal=True,
-    index=2,
-)
-
-trend = panels.build_eta_trend(df, level=int(level))
-st.plotly_chart(trend["fig"], use_container_width=True)
-
-badge_col, mk_col = st.columns(2)
-if trend["mk_p"] == trend["mk_p"]:  # not NaN
-    badge_col.metric(
-        "Theil-Sen slope (per day)",
-        f"{trend['slope']:.3g}",
-    )
-    mk_col.metric(
-        "Mann-Kendall",
-        trend["mk_trend"],
-        help=f"p = {trend['mk_p']:.3g} (N = {trend['n']})",
+    st.plotly_chart(
+        panels.build_week_violin(df, level=int(level)),
+        use_container_width=True,
     )
 
-st.plotly_chart(
-    panels.build_week_violin(df, level=int(level)),
-    use_container_width=True,
-)
-
-st.info(
-    "⚠️ η₁ and η₂ are **proxies only**. A trend in η does not uniquely "
-    "identify generator degradation — wave climatology can shift "
-    "independently. Always pair these metrics with direct health "
-    "indicators (RMS voltage, peak output)."
-)
+    st.info(
+        "⚠️ η₁ and η₂ are **proxies only**. A trend in η does not uniquely "
+        "identify generator degradation — wave climatology can shift "
+        "independently. Always pair these metrics with direct health "
+        "indicators (RMS voltage, peak output)."
+    )
 
 # ──────────────────────────────────────────────────────────────────────
 # Long-term trend (Derived_Daily)
 # ──────────────────────────────────────────────────────────────────────
-st.divider()
-st.subheader("Long-term trend (Derived_Daily)")
 
 
 @st.cache_data(ttl=300)
@@ -181,21 +190,23 @@ def _load_derived_daily() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-daily_df = _load_derived_daily()
-if daily_df.empty:
-    st.info(
-        "Derived_Daily worksheet not yet populated. "
-        "Run the `derived_daily` GitHub Action (or `python scripts/compute_daily_derived.py`) "
-        "to generate the long-term trend table."
-    )
-else:
-    try:
-        trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
-        st.plotly_chart(
-            trend_panels.build_teng_long_trend(daily_df),
-            use_container_width=True,
+with tab_long:
+    st.subheader("Long-term trend (Derived_Daily)")
+    daily_df = _load_derived_daily()
+    if daily_df.empty:
+        st.info(
+            "Derived_Daily worksheet not yet populated. "
+            "Run the `derived_daily` GitHub Action (or `python scripts/compute_daily_derived.py`) "
+            "to generate the long-term trend table."
         )
-    except Exception as exc:  # noqa: BLE001
-        st.caption(f"Long-term trend rendering failed: {exc}")
+    else:
+        try:
+            trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
+            st.plotly_chart(
+                trend_panels.build_teng_long_trend(daily_df),
+                use_container_width=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            st.caption(f"Long-term trend rendering failed: {exc}")
 
 render_footer()

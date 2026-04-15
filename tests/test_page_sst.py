@@ -87,6 +87,41 @@ def test_b1_figures():
     assert sst_panels.build_target(df) is not None
 
 
+def test_sst_timeseries_autodetects_alternate_time_column():
+    """build_sst_timeseries should not require a literal ``Timestamp`` column."""
+    from utils.p2.viz import sst_panels
+    df = _synthetic().rename(columns={"Timestamp": "Transmit Time"})
+    fig = sst_panels.build_sst_timeseries(df)
+    assert fig is not None
+    # Should have at least one trace for buoy + 4 products.
+    assert len(fig.data) >= 5
+
+
+def test_sst_timeseries_colors_per_device_when_dev_col_present():
+    """Multiple devices → one buoy trace per device in distinct colors."""
+    from utils.p2.viz import sst_panels
+    df1 = _synthetic(n=100, seed=1)
+    df1["Device Tab"] = "Buoy-A"
+    df2 = _synthetic(n=100, seed=2)
+    df2["Device Tab"] = "Buoy-B"
+    combined = pd.concat([df1, df2], ignore_index=True)
+
+    fig = sst_panels.build_sst_timeseries(combined)
+    buoy_traces = [t for t in fig.data if str(t.name).startswith("Buoy")]
+    assert len(buoy_traces) == 2
+    names = {t.name for t in buoy_traces}
+    assert names == {"Buoy — Buoy-A", "Buoy — Buoy-B"}
+
+
+def test_sst_timeseries_missing_time_col_returns_empty_fig():
+    from utils.p2.viz import sst_panels
+    df = _synthetic().drop(columns=["Timestamp"])
+    fig = sst_panels.build_sst_timeseries(df)
+    # Fig still exists but has no traces when no time column can be resolved.
+    assert fig is not None
+    assert len(fig.data) == 0
+
+
 def test_b2_drift_detection_and_alarm():
     from utils.p2.viz import sst_panels
 

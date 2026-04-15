@@ -87,22 +87,120 @@ def build_metrics_table(df: pd.DataFrame) -> pd.DataFrame:
     return metrics_table(buoy, products)
 
 
-def build_sst_timeseries(df: pd.DataFrame, ts_col: str = "Timestamp") -> Any:
+_PRODUCT_COLORS: dict[str, str] = {
+    "OISST":  "#0078D4",   # PNNL accent blue
+    "MUR":    "#C62828",   # Red
+    "OSTIA":  "#2E7D32",   # Green
+    "ERA5":   "#F0AB00",   # Battelle orange
+}
+
+
+def _resolve_ts_col(df: pd.DataFrame, ts_col: str | None) -> str | None:
+    """Return the best timestamp column name present in ``df``."""
+    if ts_col and ts_col in df.columns:
+        return ts_col
+    for candidate in ("Timestamp", "Transmit Time", "Date", "Time", "time", "timestamp"):
+        if candidate in df.columns:
+            return candidate
+    # Fuzzy fallback: first column whose name contains a time keyword.
+    for c in df.columns:
+        cl = c.lower()
+        if "time" in cl or "date" in cl or "timestamp" in cl:
+            return c
+    return None
+
+
+def _resolve_dev_col(df: pd.DataFrame) -> str | None:
+    for c in ("Device", "Device Tab", "device", "device_tab"):
+        if c in df.columns:
+            return c
+    return None
+
+
+def build_sst_timeseries(
+    df: pd.DataFrame,
+    ts_col: str | None = None,
+) -> Any:
+    """Buoy SST (per device) vs satellite/reanalysis products over time.
+
+    ``ts_col`` is auto-detected from a small set of common aliases when
+    None, so pages that don't ship a literal ``Timestamp`` column still
+    render correctly. When the frame has multiple devices the buoy
+    points are colored per device so overlapping deployments stay
+    distinguishable.
+    """
     _require_plotly()
     fig = go.Figure()
-    ts = pd.to_datetime(df.get(ts_col, pd.Series(index=df.index)), utc=True, errors="coerce")
+
+    # Lazy import so this module stays usable under the Streamlit stub.
+    try:
+        from utils.plot_utils import COLORS, apply_plot_style
+    except Exception:  # pragma: no cover
+        COLORS = ["#003E6B"]
+        apply_plot_style = None  # type: ignore[assignment]
+
+    resolved_ts = _resolve_ts_col(df, ts_col)
+    if resolved_ts is None:
+        fig.update_layout(
+            title="Sea surface temperature — no time column found",
+            xaxis_title="Time", yaxis_title="SST (°C)",
+        )
+        return fig
+
+    ts = pd.to_datetime(df[resolved_ts], utc=True, errors="coerce")
     buoy = extract_buoy_sst(df)
+    dev_col = _resolve_dev_col(df)
+
+    # Buoy points — one series per device when device info is present.
     if buoy is not None:
-        fig.add_trace(go.Scatter(
-            x=ts, y=buoy, mode="markers", name="Buoy",
-            marker=dict(size=4, color="black"),
-        ))
+        if dev_col is not None:
+            devices = list(pd.Series(df[dev_col]).dropna().unique())
+            for di, device in enumerate(devices):
+                mask = df[dev_col] == device
+                yb = buoy.loc[mask]
+                xb = ts.loc[mask]
+                if not yb.notna().any():
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=xb, y=yb,
+                    mode="markers",
+                    name=f"Buoy — {device}",
+                    marker=dict(
+                        size=5,
+                        color=COLORS[di % len(COLORS)],
+                        symbol="circle",
+                        line=dict(width=0.5, color="black"),
+                    ),
+                ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=ts, y=buoy, mode="markers", name="Buoy",
+                marker=dict(size=5, color="black"),
+            ))
+
+    # Satellite / reanalysis products as solid lines in product-specific colors.
     for name, series in extract_products(df).items():
-        fig.add_trace(go.Scatter(x=ts, y=series, mode="lines", name=name))
-    fig.update_layout(
-        title="Sea surface temperature — buoy vs satellite products",
-        xaxis_title="Time", yaxis_title="SST (°C)",
-    )
+        if not series.notna().any():
+            continue
+        color = _PRODUCT_COLORS.get(name, "#5A5A5A")
+        fig.add_trace(go.Scatter(
+            x=ts, y=series, mode="lines",
+            name=name,
+            line=dict(width=2, color=color),
+        ))
+
+    if apply_plot_style is not None:
+        apply_plot_style(
+            fig,
+            title="Sea surface temperature — buoy vs satellite products",
+            x_title="Time",
+            y_title="SST (°C)",
+        )
+    else:  # pragma: no cover
+        fig.update_layout(
+            title="Sea surface temperature — buoy vs satellite products",
+            xaxis_title="Time", yaxis_title="SST (°C)",
+        )
     return fig
 
 

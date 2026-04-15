@@ -1,19 +1,30 @@
 """
 Page 8 — SST Validation.
 
-Three sections, selectable via the sidebar radio:
-    B1 Intercomparison, B2 Drift Detection, B3 Diurnal Warming.
+The page now mirrors the Phase 1 Analytics layout:
 
-A fourth "Long-term bias trend" block reads the Derived_Daily worksheet
-and always runs, regardless of whether the raw enriched satellite columns
-are present on the main Sheet — so historical trends stay visible even
-when the most recent rows haven't been enriched yet.
+    [ Shared toolbar: device + date range ]
+    ── Tabs ──────────────────────────────────────────
+        📋 Data Explorer       (Archive-style table; enriched columns
+                                gated on the sidebar p2_show_enriched
+                                toggle)
+        📈 Sensor Overview     (Phase 1 sensor plots + 7 Phase 2
+                                enriched-column groups)
+        B1 Intercomparison
+        B2 Drift Detection
+        B3 Diurnal Warming
+        Long-term Bias         (Derived_Daily worksheet)
+
+Operators can now visually inspect the enriched raw values and sensor
+time-series before running the intercomparison / drift / diurnal
+analyses, which previously only surfaced summary statistics.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -22,7 +33,7 @@ st.set_page_config(page_title="SST Validation", page_icon="🌊", layout="wide")
 
 from utils.theme import (  # noqa: E402
     render_header, render_footer, render_sidebar, inject_custom_css,
-    PNNL_BLUE,
+    render_kpi_card, PNNL_BLUE,
 )
 
 inject_custom_css()
@@ -51,7 +62,7 @@ def _load_data() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-df = _load_data()
+raw_df = _load_data()
 
 try:
     panels = importlib.import_module("utils.p2.viz.sst_panels")
@@ -59,35 +70,173 @@ except Exception as exc:  # noqa: BLE001
     panels = None
     st.error(f"Failed to load SST panels: {exc}")
 
+try:
+    sensor_overview = importlib.import_module("utils.p2.viz.sensor_overview")
+except Exception as exc:  # noqa: BLE001
+    sensor_overview = None
+    st.caption(f"Sensor overview unavailable: {exc}")
+
+# ── Shared device + date-range toolbar ────────────────────────────────
+try:
+    toolbar = importlib.import_module("utils.p2.ui_toolbar")
+    df, selected_devices, time_col, dev_col = toolbar.render_device_time_filter(
+        raw_df, key_prefix="p8",
+    )
+except Exception as exc:  # noqa: BLE001
+    st.error(f"Toolbar unavailable: {exc}")
+    st.stop()
+
 # ──────────────────────────────────────────────────────────────────────
-# Data availability check for the per-row B1/B2/B3 sections.
+# Data availability probe — controls which tabs can do meaningful work.
 # ──────────────────────────────────────────────────────────────────────
 buoy = panels.extract_buoy_sst(df) if (panels and not df.empty) else None
 products = panels.extract_products(df) if (panels and not df.empty) else {}
 per_row_ready = panels is not None and buoy is not None and bool(products)
 
-if not per_row_ready:
-    st.warning(
-        "SST validation needs both a buoy-measured SST column and at "
-        "least one enriched satellite column (SAT_SST_OISST_cC, "
-        "SAT_SST_MUR_cC, SAT_SST_OSTIA_cC, or SAT_SST_ERA5_cC). "
-        "Trigger the `enrichment_daily` GitHub Action and reload."
-    )
-
 # ──────────────────────────────────────────────────────────────────────
-# Per-row sections (skipped when data is missing so the long-term
-# trend section below still runs).
+# Main-area tabs
 # ──────────────────────────────────────────────────────────────────────
-if per_row_ready:
-    section = st.sidebar.radio(
-        "Section",
-        options=("B1 Intercomparison", "B2 Drift Detection", "B3 Diurnal Warming"),
-        index=0,
-    )
+tab_explorer, tab_overview, tab_b1, tab_b2, tab_b3, tab_long = st.tabs([
+    "📋 Data Explorer",
+    "📈 Sensor Overview",
+    "B1 — Intercomparison",
+    "B2 — Drift Detection",
+    "B3 — Diurnal Warming",
+    "Long-term Bias",
+])
 
-    # B1 ───────────────────────────────────────────────────────────────
-    if section.startswith("B1"):
-        st.subheader("B1 — Intercomparison")
+# ── Data Explorer ─────────────────────────────────────────────────────
+with tab_explorer:
+    st.subheader("📋 Data Explorer")
+    if df.empty:
+        st.info("No data in the selected range.")
+    else:
+        # Gate enriched columns on the sidebar Phase 2 toggle.
+        show_enriched = bool(st.session_state.get("p2_show_enriched", False))
+        try:
+            from utils.p2.schema import ENRICH_COLUMN_ORDER
+        except Exception:
+            ENRICH_COLUMN_ORDER = []  # type: ignore[assignment]
+
+        try:
+            from utils.sheets_client import reorder_columns
+            display_df = reorder_columns(df)
+        except Exception:
+            display_df = df.copy()
+
+        if not show_enriched:
+            drop_cols = [c for c in ENRICH_COLUMN_ORDER if c in display_df.columns]
+            display_df = display_df.drop(columns=drop_cols)
+            st.caption(
+                "Phase 2 enriched columns hidden. Toggle **Show Phase 2 "
+                "enriched columns** in the sidebar to include SAT_SST_*, "
+                "WAVE_*, WIND_*, ERA5_*, OSCAR_*, SEAICE_*, and "
+                "ENRICH_FLAG in the table."
+            )
+        else:
+            present_enriched = [c for c in ENRICH_COLUMN_ORDER if c in display_df.columns]
+            st.caption(
+                f"Phase 2 enriched columns shown: {len(present_enriched)} of "
+                f"{len(ENRICH_COLUMN_ORDER)} ({', '.join(present_enriched) or 'none populated'})."
+            )
+
+        # Summary KPIs
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            render_kpi_card("Records", f"{len(display_df):,}")
+        if time_col and time_col in display_df.columns:
+            ts = pd.to_datetime(display_df[time_col], errors="coerce").dropna()
+            if not ts.empty:
+                with k2:
+                    render_kpi_card(
+                        "Date Range",
+                        f"{ts.min().strftime('%Y-%m-%d')} → {ts.max().strftime('%Y-%m-%d')}",
+                    )
+        if buoy is not None:
+            b = buoy.dropna()
+            if not b.empty:
+                with k3:
+                    render_kpi_card(
+                        "Buoy SST",
+                        f"{b.min():.2f} / {b.max():.2f} °C",
+                    )
+        if products:
+            total_rows = max(len(df), 1)
+            cov = sum(v.notna().any() for v in products.values())
+            with k4:
+                render_kpi_card(
+                    "SAT products",
+                    f"{cov} of {len(products)} populated",
+                )
+
+        st.dataframe(display_df, width="stretch", height=440, hide_index=True)
+
+        csv_buf = BytesIO()
+        display_df.to_csv(csv_buf, index=False)
+        st.download_button(
+            "Export CSV",
+            data=csv_buf.getvalue(),
+            file_name="sst_validation_data.csv",
+            mime="text/csv",
+            key="p8_export_csv",
+        )
+
+# ── Sensor Overview ───────────────────────────────────────────────────
+with tab_overview:
+    st.subheader("📈 Sensor Overview")
+    if sensor_overview is None:
+        st.warning("Sensor overview module failed to load.")
+    elif df.empty or not time_col:
+        st.info("Select a non-empty device / date range to see plots.")
+    else:
+        hide_ec = st.checkbox(
+            "Hide EC Conductivity & Salinity (sensor not mounted)",
+            value=True,
+            key="p8_hide_ec_salinity",
+            help="Phase 1 convention — toggle off to force-render the unused "
+                 "EC / Salinity channels.",
+        )
+
+        st.markdown(
+            f"<h4 style='color:{PNNL_BLUE}; margin-top:8px;'>Phase 1 buoy telemetry</h4>",
+            unsafe_allow_html=True,
+        )
+        phase1_figs = sensor_overview.build_phase1_sensor_figures(
+            df, time_col, dev_col, hide_ec_salinity=hide_ec,
+        )
+        if not phase1_figs:
+            st.caption("No Phase 1 sensor columns found for the current selection.")
+        for _title, fig in phase1_figs:
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown(
+            f"<h4 style='color:{PNNL_BLUE}; margin-top:8px;'>Phase 2 enriched groups</h4>",
+            unsafe_allow_html=True,
+        )
+        enriched_results = sensor_overview.build_enriched_group_figures(
+            df, time_col, dev_col,
+        )
+        if not enriched_results:
+            st.caption("No enriched columns available — run the enrichment workflows.")
+        for title, fig, reason in enriched_results:
+            if fig is None:
+                st.caption(f"*{title}* — skipped ({reason}).")
+            else:
+                st.plotly_chart(fig, use_container_width=True)
+
+# ── B1 / B2 / B3 analyses ─────────────────────────────────────────────
+_b_warning = (
+    "SST validation needs both a buoy-measured SST column and at "
+    "least one enriched satellite column (SAT_SST_OISST_cC, "
+    "SAT_SST_MUR_cC, SAT_SST_OSTIA_cC, or SAT_SST_ERA5_cC). "
+    "Trigger the `enrichment_daily` GitHub Action and reload."
+)
+
+with tab_b1:
+    st.subheader("B1 — Intercomparison")
+    if not per_row_ready:
+        st.warning(_b_warning)
+    else:
         metrics = panels.build_metrics_table(df)
         st.dataframe(metrics.style.format({
             "bias": "{:+.3f}", "rmse": "{:.3f}", "uRMSE": "{:.3f}",
@@ -103,9 +252,11 @@ if per_row_ready:
         st.plotly_chart(panels.build_sst_timeseries(df), use_container_width=True)
         st.plotly_chart(panels.build_residual_histogram(df), use_container_width=True)
 
-    # B2 ───────────────────────────────────────────────────────────────
-    elif section.startswith("B2"):
-        st.subheader("B2 — Drift Detection")
+with tab_b2:
+    st.subheader("B2 — Drift Detection")
+    if not per_row_ready:
+        st.warning(_b_warning)
+    else:
         drift = panels.build_drift_timeseries(df)
         st.plotly_chart(drift["fig"], use_container_width=True)
 
@@ -119,12 +270,15 @@ if per_row_ready:
         st.plotly_chart(panels.build_drift_boxplot(df), use_container_width=True)
         st.plotly_chart(panels.build_cusum_chart(df), use_container_width=True)
 
-    # B3 ───────────────────────────────────────────────────────────────
+with tab_b3:
+    st.subheader("B3 — Diurnal Warming")
+    if not per_row_ready:
+        st.warning(_b_warning)
     else:
-        st.subheader("B3 — Diurnal Warming")
         clear_sky = st.checkbox(
             "Clear-sky filter (requires ERA5 cloud_cover column)",
             value=False,
+            key="p8_clear_sky",
             help="If ERA5 cloud_cover is not in the enriched schema, the toggle has no effect.",
         )
         df_view = df
@@ -135,12 +289,9 @@ if per_row_ready:
         st.plotly_chart(panels.build_amplitude_vs_wind(df_view), use_container_width=True)
         st.caption("Kawai & Wada (2007) overlay is a qualitative envelope.")
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Long-term bias trend (Derived_Daily) — always runs.
 # ──────────────────────────────────────────────────────────────────────
-st.divider()
-st.subheader("30-day bias trend (Derived_Daily)")
 
 
 @st.cache_data(ttl=300)
@@ -165,26 +316,28 @@ def _load_derived_daily() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-daily_df = _load_derived_daily()
-if daily_df.empty:
-    st.info(
-        "Derived_Daily worksheet not yet populated. "
-        "Run the `derived_daily` GitHub Action (or "
-        "`python scripts/compute_daily_derived.py`) to generate the "
-        "daily-aggregation table, then reload this page."
-    )
-else:
-    try:
-        trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
-        st.plotly_chart(
-            trend_panels.build_sst_bias_trend(daily_df, window_days=30),
-            use_container_width=True,
+with tab_long:
+    st.subheader("30-day bias trend (Derived_Daily)")
+    daily_df = _load_derived_daily()
+    if daily_df.empty:
+        st.info(
+            "Derived_Daily worksheet not yet populated. "
+            "Run the `derived_daily` GitHub Action (or "
+            "`python scripts/compute_daily_derived.py`) to generate the "
+            "daily-aggregation table, then reload this page."
         )
-        latest = daily_df.tail(7)
-        if not latest.empty:
-            st.caption("Last 7 rows from Derived_Daily")
-            st.dataframe(latest, use_container_width=True)
-    except Exception as exc:  # noqa: BLE001
-        st.caption(f"Bias trend rendering failed: {exc}")
+    else:
+        try:
+            trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
+            st.plotly_chart(
+                trend_panels.build_sst_bias_trend(daily_df, window_days=30),
+                use_container_width=True,
+            )
+            latest = daily_df.tail(7)
+            if not latest.empty:
+                st.caption("Last 7 rows from Derived_Daily")
+                st.dataframe(latest, use_container_width=True)
+        except Exception as exc:  # noqa: BLE001
+            st.caption(f"Bias trend rendering failed: {exc}")
 
 render_footer()
