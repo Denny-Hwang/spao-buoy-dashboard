@@ -191,3 +191,52 @@ def test_canonicalize_lat_lon_noop_when_lat_lon_absent() -> None:
     out = canonicalize_lat_lon(df)
     # No lat/lon to rename → passthrough.
     assert out is df
+
+
+# ---------- FY25 compound "Approx Lat/Lng" column ------------------
+
+def test_canonicalize_splits_compound_latlng_column() -> None:
+    """FY25 tabs store GPS as a single ``Approx Lat/Lng`` column
+    containing ``"58.4494,-174.29623"``. canonicalize_lat_lon must
+    parse it into numeric Lat / Lon columns."""
+    df = pd.DataFrame({
+        "Date Time (UTC)": ["2025-09-10 02:23", "2025-09-10 03:10"],
+        "Approx Lat/Lng": ["58.4494,-174.29623", "58.2881,-169.98806"],
+        "Payload": ["042304ed", "01dd0434"],
+    })
+    out = canonicalize_lat_lon(df)
+    assert "Lat" in out.columns
+    assert "Lon" in out.columns
+    assert out["Lat"].tolist() == pytest.approx([58.4494, 58.2881], rel=1e-6)
+    assert out["Lon"].tolist() == pytest.approx([-174.29623, -169.98806], rel=1e-6)
+    # Original frame untouched.
+    assert "Lat" not in df.columns
+
+
+def test_canonicalize_handles_empty_compound_values() -> None:
+    """Blank / NaN entries in a compound Lat/Lng column become NaN
+    (not exceptions) on both sides of the split."""
+    df = pd.DataFrame({
+        "Approx Lat/Lng": ["58.5,-174.0", "", None, "not-a-pair", "59.0,-170.0"],
+    })
+    out = canonicalize_lat_lon(df)
+    # First and last rows parse, middle three are NaN.
+    lats = out["Lat"].tolist()
+    lons = out["Lon"].tolist()
+    assert lats[0] == pytest.approx(58.5)
+    assert lats[-1] == pytest.approx(59.0)
+    assert pd.isna(lats[1]) and pd.isna(lats[2]) and pd.isna(lats[3])
+    assert pd.isna(lons[1]) and pd.isna(lons[2]) and pd.isna(lons[3])
+
+
+def test_canonicalize_does_not_split_when_separate_columns_exist() -> None:
+    """When regular Lat / Lon already exist, the compound code path
+    should not fire even if a stray compound-looking column is present."""
+    df = pd.DataFrame({
+        "Lat": [58.5],
+        "Lon": [-174.0],
+        "Approx Lat/Lng": ["58.5,-174.0"],  # shouldn't interfere
+    })
+    out = canonicalize_lat_lon(df)
+    # Already canonical — passthrough.
+    assert out is df

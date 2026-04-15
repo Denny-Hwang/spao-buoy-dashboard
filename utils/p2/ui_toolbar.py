@@ -65,11 +65,61 @@ def _first_substring(
     return None
 
 
+def _split_compound_latlon_series(
+    s: pd.Series,
+) -> tuple[pd.Series, pd.Series] | None:
+    """Parse a compound ``"lat,lon"`` string column into numeric pair.
+
+    Used for FY25 Bearing-sea worksheets where GPS lives in a single
+    ``Approx Lat/Lng`` column. Returns ``None`` if the values don't
+    look like comma-separated float pairs. Tolerates partial garbage
+    — at least one parseable pair in the first ~10 non-empty samples
+    is enough to trigger the split.
+    """
+    def _looks_like_pair(v: str) -> bool:
+        parts = [p.strip() for p in v.split(",")]
+        if len(parts) != 2:
+            return False
+        try:
+            float(parts[0])
+            float(parts[1])
+            return True
+        except ValueError:
+            return False
+
+    sample = (
+        s.dropna().astype(str).str.strip().replace("", pd.NA).dropna().head(10).tolist()
+    )
+    if not sample or not any(_looks_like_pair(v) for v in sample):
+        return None
+    lats: list[float] = []
+    lons: list[float] = []
+    for v in s:
+        try:
+            if v is None:
+                raise ValueError
+            txt = str(v).strip()
+            if not txt:
+                raise ValueError
+            parts = [p.strip() for p in txt.split(",")]
+            if len(parts) != 2:
+                raise ValueError
+            lats.append(float(parts[0]))
+            lons.append(float(parts[1]))
+        except (TypeError, ValueError):
+            lats.append(float("nan"))
+            lons.append(float("nan"))
+    return pd.Series(lats, index=s.index), pd.Series(lons, index=s.index)
+
+
 def resolve_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
     """Detect the best latitude / longitude column names in ``df``.
 
     Tries exact aliases first, then a substring fallback. Returns
-    ``(None, None)`` if either is missing.
+    ``(None, None)`` if either is missing. Note: when a single
+    compound column (e.g. ``"Approx Lat/Lng"``) exists, both returned
+    names will be the same — callers should use
+    :func:`canonicalize_lat_lon` to split it into two numeric columns.
     """
     lat = _first_alias(df, _LAT_ALIASES) or _first_substring(df, _LAT_SUBSTRINGS)
     lon = _first_alias(df, _LON_ALIASES) or _first_substring(
@@ -79,17 +129,35 @@ def resolve_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
 
 
 def canonicalize_lat_lon(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a shallow copy of ``df`` with Lat/Lon columns renamed to the
-    canonical names ``Lat`` / ``Lon`` so downstream panels (Phase 2
-    drift / sensor_overview / sst_panels) can look them up without
-    needing their own alias tables.
+    """Return a ``df`` copy where Lat/Lon are renamed to the canonical
+    names ``Lat`` / ``Lon`` so downstream Phase 2 panels (drift /
+    sensor_overview / sst_panels) can look them up without needing
+    their own alias tables.
 
-    Idempotent — if the canonical names already exist, ``df`` is
-    returned untouched.
+    Also handles the FY25 compound-column edge case: when a single
+    ``"Approx Lat/Lng"``-style column resolves to *both* lat and lon,
+    its string values are parsed into two numeric columns.
+
+    Idempotent — if the canonical names already exist and no compound
+    split is needed, ``df`` is returned untouched.
     """
     if df is None or df.empty:
         return df
     lat, lon = resolve_lat_lon_columns(df)
+
+    # Compound-column case: lat/lon resolvers both landed on the same
+    # header with comma-separated values. Parse it into two columns.
+    if lat is not None and lat == lon:
+        parsed = _split_compound_latlon_series(df[lat])
+        if parsed is not None:
+            out = df.copy()
+            out["Lat"] = parsed[0]
+            out["Lon"] = parsed[1]
+            return out
+        # Could not parse — fall through and return df unchanged so
+        # the caller can surface a friendly error.
+        return df
+
     rename: dict[str, str] = {}
     if lat and lat != "Lat" and "Lat" not in df.columns:
         rename[lat] = "Lat"

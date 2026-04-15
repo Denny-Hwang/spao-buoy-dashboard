@@ -68,6 +68,11 @@ SOURCE_COLUMNS: dict[str, list[str]] = {
     "open_meteo_marine": [
         "WAVE_H_cm", "WAVE_T_ds", "WAVE_DIR_deg",
         "SWELL_H_cm", "SWELL_T_ds",
+        # Open-Meteo Marine also returns sea_surface_temperature (ERA5-
+        # derived). We populate SAT_SST_ERA5_cC as a general-purpose SST
+        # fallback so Page 8 still has *some* SST reference even when
+        # the daily NOAA OISST / MUR / OSTIA workflow is unavailable.
+        "SAT_SST_ERA5_cC",
     ],
     "open_meteo_historical": [
         "WIND_SPD_cms", "WIND_DIR_deg", "ERA5_PRES_dPa", "ERA5_AIRT_cC",
@@ -165,6 +170,81 @@ def _first_substring_match(
     return None
 
 
+# Synthetic column names we inject when splitting a compound
+# "Approx Lat/Lng" style column. Underscores prefix/suffix so they
+# cannot clash with real sheet headers.
+_COMPOUND_LAT = "__p2_parsed_lat__"
+_COMPOUND_LON = "__p2_parsed_lon__"
+
+
+def _split_compound_latlon(df: pd.DataFrame) -> tuple[str, str] | None:
+    """Detect a compound 'Lat/Lng' column and split it in place.
+
+    FY25 Bearing-sea worksheets store GPS as a single column named
+    e.g. ``"Approx Lat/Lng"`` whose values look like
+    ``"58.4494,-174.29623"``. The substring resolver sees "lat" AND
+    "lng" in the same header and points both _LAT and _LON lookups at
+    that single column, which then fails to coerce to float.
+
+    When detected, this helper parses the string values into two new
+    synthetic numeric columns (``__p2_parsed_lat__`` / ``__p2_parsed_lon__``)
+    so the rest of the pipeline can treat them as regular Lat/Lon.
+
+    Returns ``(lat_col_name, lon_col_name)`` on success, ``None`` if no
+    compound column is present or its contents don't parse.
+    """
+    def _looks_like_pair(v: str) -> bool:
+        parts = [p.strip() for p in v.split(",")]
+        if len(parts) != 2:
+            return False
+        try:
+            float(parts[0])
+            float(parts[1])
+            return True
+        except ValueError:
+            return False
+
+    for col in df.columns:
+        cl = str(col).lower()
+        if "lat" not in cl:
+            continue
+        if not ("lng" in cl or "lon" in cl):
+            continue
+        # Look at a few non-empty values to decide if it's really a
+        # comma-separated pair rather than e.g. plain latitude with a
+        # misleading header. We accept partial garbage (bad rows amid
+        # good ones) — at least one parseable pair is enough.
+        sample = (
+            df[col].dropna().astype(str).str.strip().replace("", pd.NA).dropna().head(10).tolist()
+        )
+        if not sample:
+            return None
+        if not any(_looks_like_pair(s) for s in sample):
+            return None
+
+        lats: list[float] = []
+        lons: list[float] = []
+        for v in df[col]:
+            try:
+                if v is None:
+                    raise ValueError
+                txt = str(v).strip()
+                if not txt:
+                    raise ValueError
+                parts = [p.strip() for p in txt.split(",")]
+                if len(parts) != 2:
+                    raise ValueError
+                lats.append(float(parts[0]))
+                lons.append(float(parts[1]))
+            except (TypeError, ValueError):
+                lats.append(float("nan"))
+                lons.append(float("nan"))
+        df[_COMPOUND_LAT] = lats
+        df[_COMPOUND_LON] = lons
+        return _COMPOUND_LAT, _COMPOUND_LON
+    return None
+
+
 def locate_geotemporal_columns(df: pd.DataFrame) -> tuple[str, str, str]:
     ts = _first_alias(df, _TIMESTAMP_ALIASES)
     lat = _first_alias(df, _LAT_ALIASES)
@@ -175,6 +255,12 @@ def locate_geotemporal_columns(df: pd.DataFrame) -> tuple[str, str, str]:
         lat = _first_substring_match(df, _LAT_SUBSTRINGS)
     if lon is None:
         lon = _first_substring_match(df, _LON_SUBSTRINGS, exclude=_LON_EXCLUDE_SUBSTRINGS)
+    # Edge case: a compound "Lat/Lng" column resolves to the SAME
+    # header for both lat and lon. Split it into two numeric columns.
+    if lat is not None and lat == lon:
+        compound = _split_compound_latlon(df)
+        if compound is not None:
+            lat, lon = compound
     if ts is None or lat is None or lon is None:
         raise RuntimeError(
             f"Sheet missing geo/time columns: timestamp={ts}, lat={lat}, lon={lon}"
@@ -205,11 +291,24 @@ def _is_missing_gps(lat: float, lon: float) -> bool:
 
 
 def ensure_enrichment_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Make sure every enrichment column exists, with ``object`` dtype.
+
+    Using ``object`` dtype matters under pandas 3.0 where the default
+    inference for ``""`` is ``string`` (ArrowString), which then
+    rejects numeric assignments like ``df.at[i, "WAVE_H_cm"] = 125``.
+    The production flow reads from Google Sheets via gspread (always
+    returns object columns) so this is only a defensive guard for
+    tests and unusual callers.
+    """
     for col in ENRICHED_COLUMNS:
         if col not in df.columns:
-            df[col] = ""
+            df[col] = pd.Series([""] * len(df), dtype=object, index=df.index)
+        elif df[col].dtype != object:
+            df[col] = df[col].astype(object)
     if "ENRICH_FLAG" not in df.columns:
-        df["ENRICH_FLAG"] = 0
+        df["ENRICH_FLAG"] = pd.Series([0] * len(df), dtype=object, index=df.index)
+    elif df["ENRICH_FLAG"].dtype != object:
+        df["ENRICH_FLAG"] = df["ENRICH_FLAG"].astype(object)
     return df
 
 
@@ -311,6 +410,11 @@ def enrich_open_meteo_marine(
                 "WAVE_DIR_deg": row.get("wave_direction"),
                 "SWELL_H_cm": row.get("swell_wave_height"),
                 "SWELL_T_ds": row.get("swell_wave_period"),
+                # SST fallback from the same Marine API call. This is
+                # only populated opportunistically — if NOAA OISST,
+                # MUR or OSTIA later fill their own columns, those
+                # stay the authoritative reference for B1/B2/B3 stats.
+                "SAT_SST_ERA5_cC": row.get("sea_surface_temperature"),
             })
             _or_flag(df, [idx], EnrichFlag.WAVE)
             filled += 1
