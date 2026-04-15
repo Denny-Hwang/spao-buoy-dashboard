@@ -88,6 +88,21 @@ def inject_custom_css():
     """Inject custom CSS for improved font sizes across sidebar and tabs."""
     st.markdown("""
     <style>
+    /* Global app font smoothing and sizing */
+    html, body, [data-testid="stAppViewContainer"] {
+        font-size: 16px;
+    }
+    .stApp, [data-testid="stAppViewContainer"] p,
+    [data-testid="stAppViewContainer"] li,
+    [data-testid="stAppViewContainer"] label {
+        font-size: 1rem !important;
+        line-height: 1.55 !important;
+    }
+    [data-testid="stAppViewContainer"] h1 { font-size: 2rem !important; }
+    [data-testid="stAppViewContainer"] h2 { font-size: 1.55rem !important; }
+    [data-testid="stAppViewContainer"] h3 { font-size: 1.25rem !important; }
+    [data-testid="stAppViewContainer"] h4 { font-size: 1.1rem !important; }
+
     /* Sidebar navigation items — bigger, bolder */
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a span,
     section[data-testid="stSidebar"] nav a span {
@@ -97,6 +112,48 @@ def inject_custom_css():
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a,
     section[data-testid="stSidebar"] nav a {
         padding: 0.4rem 1rem !important;
+    }
+
+    /* Sidebar widget labels (radios, checkboxes, selects) — restore size */
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stRadio label,
+    section[data-testid="stSidebar"] .stCheckbox label,
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        font-size: 0.95rem !important;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
+        font-size: 0.95rem !important;
+        font-weight: 500 !important;
+    }
+
+    /* ── Phase 1 / Phase 2 section separators in the sidebar nav ── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]) {
+        position: relative;
+        margin-top: 6px;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"])::before {
+        content: "PHASE 1 — OPERATIONAL";
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        color: #5A5A5A;
+        padding: 6px 1rem 4px 1rem;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="TENG_Performance"]) {
+        position: relative;
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 2px solid #003E6B;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="TENG_Performance"])::before {
+        content: "PHASE 2 — SCIENTIFIC";
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        color: #5A5A5A;
+        padding: 2px 1rem 4px 1rem;
     }
 
     /* Reduce gap between branding and nav items */

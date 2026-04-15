@@ -15,7 +15,19 @@ import streamlit as st
 
 st.set_page_config(page_title="TENG Performance", page_icon="🔋", layout="wide")
 
-st.title("🔋 TENG Performance")
+from utils.theme import (  # noqa: E402
+    render_header, render_footer, render_sidebar, inject_custom_css,
+    PNNL_BLUE,
+)
+
+inject_custom_css()
+render_sidebar()
+render_header()
+
+st.markdown(
+    f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">🔋 TENG Performance</h1>',
+    unsafe_allow_html=True,
+)
 
 # ──────────────────────────────────────────────────────────────────────
 # Phase 2 sidebar toggle (defensively imported so a broken helper
@@ -185,3 +197,5 @@ else:
         )
     except Exception as exc:  # noqa: BLE001
         st.caption(f"Long-term trend rendering failed: {exc}")
+
+render_footer()
