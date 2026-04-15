@@ -1,8 +1,13 @@
 """
 Page 9 — Drift Dynamics.
 
-Three sections, selectable via the sidebar:
+Three sections, selected via main-area tabs:
     C1 Trajectory, C2 Ekman decomposition, C3 Storm Response.
+
+Device and date-range selection lives in the shared Phase 2 toolbar
+(``utils.p2.ui_toolbar.render_device_time_filter``), mirroring the
+Phase 1 Analytics page so all analyses operate on an explicitly scoped
+frame rather than a silent all-devices concat.
 """
 
 from __future__ import annotations
@@ -45,7 +50,7 @@ def _load_data() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-df = _load_data()
+raw_df = _load_data()
 
 try:
     panels = importlib.import_module("utils.p2.viz.drift_panels")
@@ -53,25 +58,34 @@ except Exception as exc:  # noqa: BLE001
     st.error(f"Failed to load drift panels: {exc}")
     st.stop()
 
-REQUIRED = ("Lat", "Lon", "Timestamp")
+# ── Shared device + date-range toolbar ────────────────────────────────
+try:
+    toolbar = importlib.import_module("utils.p2.ui_toolbar")
+    df, selected_devices, time_col, dev_col = toolbar.render_device_time_filter(
+        raw_df, key_prefix="p9",
+    )
+except Exception as exc:  # noqa: BLE001
+    st.error(f"Toolbar unavailable: {exc}")
+    st.stop()
+
+REQUIRED = ("Lat", "Lon")
 missing = [c for c in REQUIRED if c not in df.columns]
 if df.empty or missing:
     st.warning(
-        "Drift Dynamics needs at least Lat, Lon, and Timestamp columns. "
-        f"Missing: {missing or '(empty data)'}."
+        "Drift Dynamics needs at least Lat and Lon columns. "
+        f"Missing: {missing or '(empty selection)'}."
     )
     st.stop()
 
-section = st.sidebar.radio(
-    "Section",
-    options=("C1 Trajectory", "C2 Ekman decomposition", "C3 Storm Response"),
-    index=0,
-)
+# ── Main-area tabs ────────────────────────────────────────────────────
+tab_c1, tab_c2, tab_c3 = st.tabs([
+    "C1 — Trajectory",
+    "C2 — Ekman decomposition",
+    "C3 — Storm Response",
+])
 
-# ──────────────────────────────────────────────────────────────────────
-# C1 — Trajectory
-# ──────────────────────────────────────────────────────────────────────
-if section.startswith("C1"):
+# C1 — Trajectory ──────────────────────────────────────────────────────
+with tab_c1:
     st.subheader("C1 — Trajectory")
     st.plotly_chart(panels.build_trajectory_speed_colored(df), use_container_width=True)
     st.plotly_chart(panels.build_stick_plot_drift(df), use_container_width=True)
@@ -81,10 +95,8 @@ if section.startswith("C1"):
     with col2:
         st.plotly_chart(panels.build_daily_displacement(df), use_container_width=True)
 
-# ──────────────────────────────────────────────────────────────────────
-# C2 — Ekman decomposition
-# ──────────────────────────────────────────────────────────────────────
-elif section.startswith("C2"):
+# C2 — Ekman decomposition ────────────────────────────────────────────
+with tab_c2:
     st.subheader("C2 — Ekman decomposition")
     st.plotly_chart(panels.build_alpha_timeseries(df), use_container_width=True)
     st.caption(
@@ -103,10 +115,8 @@ elif section.startswith("C2"):
 
     st.plotly_chart(panels.build_residual_vs_oscar(df), use_container_width=True)
 
-# ──────────────────────────────────────────────────────────────────────
-# C3 — Storm Response
-# ──────────────────────────────────────────────────────────────────────
-else:
+# C3 — Storm Response ─────────────────────────────────────────────────
+with tab_c3:
     st.subheader("C3 — Storm Response")
     table = panels.build_storm_event_table(df)
     if table.empty:
