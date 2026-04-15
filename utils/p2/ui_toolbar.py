@@ -25,6 +25,80 @@ import streamlit as st
 
 TIME_KEYWORDS: tuple[str, ...] = ("time", "timestamp", "date")
 
+# ---------- Geo column aliases ---------------------------------------
+# Exact-name candidates, ordered by preference. If none match, the
+# substring fallback below is used — this mirrors the loose matching
+# Phase 1 Analytics uses so FY25 tabs with headers like
+# "Approx Latitude" / "GPS Longitude" still resolve correctly.
+_LAT_ALIASES: tuple[str, ...] = (
+    "Lat", "Latitude", "lat", "Lat (°)", "Latitude (°)", "Latitude (deg)",
+    "GPS Lat", "GPS_Lat", "GPS Latitude", "GPS_Latitude",
+)
+_LON_ALIASES: tuple[str, ...] = (
+    "Lon", "Lng", "Longitude", "lon", "Lon (°)", "Longitude (°)", "Longitude (deg)",
+    "GPS Lon", "GPS_Lon", "GPS Longitude", "GPS_Longitude",
+)
+_LAT_SUBSTRINGS: tuple[str, ...] = ("latitude", "lat")
+_LON_SUBSTRINGS: tuple[str, ...] = ("longitude", "lng", "lon")
+_LON_EXCLUDE_SUBSTRINGS: tuple[str, ...] = ("longevity", "long-term", "longterm")
+
+
+def _first_alias(df: pd.DataFrame, aliases: tuple[str, ...]) -> str | None:
+    for a in aliases:
+        if a in df.columns:
+            return a
+    return None
+
+
+def _first_substring(
+    df: pd.DataFrame,
+    needles: tuple[str, ...],
+    *,
+    exclude: tuple[str, ...] = (),
+) -> str | None:
+    for c in df.columns:
+        cl = str(c).lower()
+        if any(x in cl for x in exclude):
+            continue
+        if any(n in cl for n in needles):
+            return c
+    return None
+
+
+def resolve_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    """Detect the best latitude / longitude column names in ``df``.
+
+    Tries exact aliases first, then a substring fallback. Returns
+    ``(None, None)`` if either is missing.
+    """
+    lat = _first_alias(df, _LAT_ALIASES) or _first_substring(df, _LAT_SUBSTRINGS)
+    lon = _first_alias(df, _LON_ALIASES) or _first_substring(
+        df, _LON_SUBSTRINGS, exclude=_LON_EXCLUDE_SUBSTRINGS,
+    )
+    return lat, lon
+
+
+def canonicalize_lat_lon(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a shallow copy of ``df`` with Lat/Lon columns renamed to the
+    canonical names ``Lat`` / ``Lon`` so downstream panels (Phase 2
+    drift / sensor_overview / sst_panels) can look them up without
+    needing their own alias tables.
+
+    Idempotent — if the canonical names already exist, ``df`` is
+    returned untouched.
+    """
+    if df is None or df.empty:
+        return df
+    lat, lon = resolve_lat_lon_columns(df)
+    rename: dict[str, str] = {}
+    if lat and lat != "Lat" and "Lat" not in df.columns:
+        rename[lat] = "Lat"
+    if lon and lon != "Lon" and "Lon" not in df.columns:
+        rename[lon] = "Lon"
+    if not rename:
+        return df
+    return df.rename(columns=rename)
+
 
 def find_time_col(df: pd.DataFrame) -> str | None:
     """Return the first column that looks like a timestamp, or None.
@@ -157,6 +231,11 @@ def render_device_time_filter(
     filtered = apply_device_time_filter(
         scoped, selected_devices, dev_col, time_col, start_dt, end_dt,
     )
+    # Canonicalize lat/lon so downstream panels (drift, sst, sensor
+    # overview) can assume the column names "Lat" / "Lon" regardless
+    # of the sheet's original header style.
+    filtered = canonicalize_lat_lon(filtered)
+
     if filtered.empty:
         st.warning("No data in the selected range. Adjust the filter.")
 

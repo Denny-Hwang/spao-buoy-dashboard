@@ -25,7 +25,13 @@ except Exception:  # pragma: no cover
     go = None  # type: ignore[assignment]
     make_subplots = None  # type: ignore[assignment]
 
-from ..physics.ekman import compute_drift_velocity, decompose_drift, fit_windage
+from ..physics.ekman import (
+    compute_drift_velocity,
+    decompose_drift,
+    fit_windage,
+    _resolve_lat_col,
+    _resolve_lon_col,
+)
 from ..physics.storms import detect_storms, superposed_epoch
 
 NIILER_PADUAN_ALPHA = 0.007   # drogued surface drifters
@@ -47,8 +53,10 @@ def build_trajectory_speed_colored(df: pd.DataFrame) -> Any:
     drift = compute_drift_velocity(df)
     if "u_drift" not in drift.columns:
         return go.Figure().update_layout(title="Trajectory — no drift data")
-    lat = pd.to_numeric(drift.get("Lat"), errors="coerce")
-    lon = pd.to_numeric(drift.get("Lon"), errors="coerce")
+    lat_col = _resolve_lat_col(drift) or "Lat"
+    lon_col = _resolve_lon_col(drift) or "Lon"
+    lat = pd.to_numeric(drift.get(lat_col), errors="coerce")
+    lon = pd.to_numeric(drift.get(lon_col), errors="coerce")
     speed = np.sqrt(drift["u_drift"] ** 2 + drift["v_drift"] ** 2)
     mask = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(speed)
     fig = go.Figure()

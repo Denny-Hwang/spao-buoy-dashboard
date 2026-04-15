@@ -60,70 +60,89 @@ _HIDEABLE = {"EC Conductivity", "Salinity"}
 # where ``scale_factors`` matches the encoded → physical conversion
 # used by utils/p2/schema.ENRICHED_COLUMNS so the legend is in SI.
 # ──────────────────────────────────────────────────────────────────────
+# Each series entry is ``(col, label, unit, scale, axis)`` where axis
+# is "y" for the primary axis and "y2" for the secondary.
+#
+# Dual-y rule: whenever a group renders 2+ series we show the primary
+# quantity on y1 and any additional (different-unit or comparison)
+# quantities on y2 so neither gets flattened by the other's scale.
+# Groups with only a single series use the primary axis.
 ENRICHED_GROUPS: list[dict] = [
     {
         "key": "wave",
         "title": "Waves (Open-Meteo Marine)",
         "series": [
-            ("WAVE_H_cm",  "Hs",     "m",   100.0),
-            ("SWELL_H_cm", "Hswell", "m",   100.0),
+            ("WAVE_H_cm",  "Hs",     "m",   100.0, "y"),
+            ("SWELL_H_cm", "Hswell", "m",   100.0, "y2"),
         ],
-        "y_label": "Wave height (m)",
+        "y_label": "Hs — wave height (m)",
+        "y2_label": "Hswell — swell height (m)",
     },
     {
         "key": "wave_period",
         "title": "Wave period & direction",
         "series": [
-            ("WAVE_T_ds",   "Tp",          "s",   10.0),
-            ("SWELL_T_ds",  "Tswell",      "s",   10.0),
-            ("WAVE_DIR_deg","Wave dir",    "deg",  1.0),
+            ("WAVE_T_ds",   "Tp",          "s",   10.0, "y"),
+            ("SWELL_T_ds",  "Tswell",      "s",   10.0, "y"),
+            ("WAVE_DIR_deg","Wave dir",    "deg",  1.0, "y2"),
         ],
-        "y_label": "Period (s) / direction (deg)",
+        "y_label": "Period (s)",
+        "y2_label": "Direction (deg)",
     },
     {
         "key": "wind",
         "title": "Wind (10 m, Open-Meteo Historical)",
         "series": [
-            ("WIND_SPD_cms", "Wind speed",     "m/s", 100.0),
-            ("WIND_DIR_deg", "Wind direction", "deg",   1.0),
+            ("WIND_SPD_cms", "Wind speed",     "m/s", 100.0, "y"),
+            ("WIND_DIR_deg", "Wind direction", "deg",   1.0, "y2"),
         ],
-        "y_label": "Speed (m/s) / direction (deg)",
+        "y_label": "Wind speed (m/s)",
+        "y2_label": "Wind direction (deg)",
     },
     {
         "key": "atmos",
         "title": "Atmosphere (ERA5)",
         "series": [
-            ("ERA5_PRES_dPa", "Pressure",    "Pa",  0.1),
-            ("ERA5_AIRT_cC",  "Air temp",    "°C",  100.0),
+            ("ERA5_PRES_dPa", "Pressure",    "Pa",  0.1,   "y"),
+            ("ERA5_AIRT_cC",  "Air temp",    "°C",  100.0, "y2"),
         ],
-        "y_label": "Pa / °C",
+        "y_label": "Surface pressure (Pa)",
+        "y2_label": "Air temperature (°C)",
     },
     {
         "key": "sst_products",
         "title": "Sea surface temperature — buoy vs satellite products",
         "series": [
-            ("SAT_SST_OISST_cC", "OISST",  "°C", 100.0),
-            ("SAT_SST_MUR_cC",   "MUR",    "°C", 100.0),
-            ("SAT_SST_OSTIA_cC", "OSTIA",  "°C", 100.0),
-            ("SAT_SST_ERA5_cC",  "ERA5",   "°C", 100.0),
+            # First product on y1; remaining products on y2 so the user
+            # gets an explicit dual-axis comparison per the style rule.
+            # Secondary axis is range-linked to primary in the builder
+            # below so the °C values stay directly comparable.
+            ("SAT_SST_OISST_cC", "OISST",  "°C", 100.0, "y"),
+            ("SAT_SST_MUR_cC",   "MUR",    "°C", 100.0, "y2"),
+            ("SAT_SST_OSTIA_cC", "OSTIA",  "°C", 100.0, "y2"),
+            ("SAT_SST_ERA5_cC",  "ERA5",   "°C", 100.0, "y2"),
         ],
-        "y_label": "SST (°C)",
+        "y_label": "OISST (°C)",
+        "y2_label": "Other SST products (°C)",
         "overlay_buoy_sst": True,
+        "link_y2_to_y": True,
     },
     {
         "key": "ocean_currents",
         "title": "Ocean surface currents (OSCAR)",
         "series": [
-            ("OSCAR_U_mms", "U (east)",  "m/s", 1000.0),
-            ("OSCAR_V_mms", "V (north)", "m/s", 1000.0),
+            ("OSCAR_U_mms", "U (east)",  "m/s", 1000.0, "y"),
+            ("OSCAR_V_mms", "V (north)", "m/s", 1000.0, "y2"),
         ],
-        "y_label": "Current (m/s)",
+        "y_label": "U current (m/s, east)",
+        "y2_label": "V current (m/s, north)",
+        "link_y2_to_y": True,
     },
     {
         "key": "seaice",
         "title": "Sea-ice concentration (OSI SAF)",
         "series": [
-            ("SEAICE_CONC_pct", "Sea ice", "%", 1.0),
+            ("SEAICE_CONC_pct", "Sea ice", "%", 1.0, "y"),
         ],
         "y_label": "Concentration (%)",
     },
@@ -131,7 +150,7 @@ ENRICHED_GROUPS: list[dict] = [
         "key": "enrich_flag",
         "title": "Enrichment coverage (ENRICH_FLAG)",
         "series": [
-            ("ENRICH_FLAG", "ENRICH_FLAG", "bitfield", 1.0),
+            ("ENRICH_FLAG", "ENRICH_FLAG", "bitfield", 1.0, "y"),
         ],
         "y_label": "Bitfield value",
     },
@@ -258,7 +277,7 @@ def build_enriched_group_figures(
 
     for group in ENRICHED_GROUPS:
         title = group["title"]
-        cols = [c for c, _n, _u, _s in group["series"]]
+        cols = [s[0] for s in group["series"]]
         reason = _empty_reason(base, cols)
 
         # SST product group: also check for a buoy-SST column to overlay.
@@ -277,17 +296,27 @@ def build_enriched_group_figures(
 
         fig = _new_fig()
         plotted_any = False
+        uses_secondary = False
 
         # Per-series: one trace per (device × variable). When multiple
         # devices are selected we color by device and dash by variable.
         devices = base[dev_col].unique() if dev_col in base.columns else [None]
 
-        for si, (col, label, unit, scale) in enumerate(group["series"]):
+        for si, entry in enumerate(group["series"]):
+            # Support 4-tuple (legacy, no axis) and 5-tuple (col, label,
+            # unit, scale, axis) entries.
+            if len(entry) == 5:
+                col, label, unit, scale, axis = entry
+            else:
+                col, label, unit, scale = entry  # type: ignore[misc]
+                axis = "y"
             if col not in base.columns:
                 continue
             y = _decode(base[col], scale)
             if not y.notna().any():
                 continue
+            if axis == "y2":
+                uses_secondary = True
             for di, device in enumerate(devices):
                 if device is None:
                     mask = pd.Series(True, index=base.index)
@@ -309,10 +338,12 @@ def build_enriched_group_figures(
                     name=name,
                     line=dict(width=LINE_WIDTH, color=color, dash=dash),
                     marker=dict(size=MARKER_SIZE, color=color),
+                    yaxis=axis,
                 ))
                 plotted_any = True
 
-        # SST products: overlay buoy SST as black dots on the same axis.
+        # SST products: overlay buoy SST as black dots on the primary
+        # axis so operators can visually anchor the comparison.
         if group.get("overlay_buoy_sst"):
             buoy_col = _find_col_by_keywords(
                 base, ("sst_buoy", "water temp", "ocean temp", "sst"),
@@ -337,6 +368,7 @@ def build_enriched_group_figures(
                             color="black",
                             symbol="circle",
                         ),
+                        yaxis="y",
                     ))
                     plotted_any = True
 
@@ -350,6 +382,36 @@ def build_enriched_group_figures(
             x_title=time_col,
             y_title=group["y_label"],
         )
+
+        # Secondary axis configuration — only when at least one series
+        # was actually assigned to y2.
+        if uses_secondary:
+            y2_cfg: dict = dict(
+                title=dict(text=group.get("y2_label", ""), font=dict(size=17)),
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                tickfont=dict(size=14),
+            )
+            # When both axes represent the same physical unit (e.g. all
+            # °C for SST products or m/s for OSCAR currents) lock the
+            # ranges together so traces remain directly comparable.
+            if group.get("link_y2_to_y"):
+                y2_cfg["matches"] = "y"
+            fig.update_layout(yaxis2=y2_cfg)
+            # Give the legend a little breathing room so the second
+            # y-axis labels aren't clipped.
+            fig.update_layout(
+                margin=dict(l=60, r=70, t=60, b=50),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1.0,
+                ),
+            )
+
         out.append((title, fig, None))
 
     return out

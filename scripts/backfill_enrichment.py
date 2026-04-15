@@ -131,6 +131,17 @@ _LON_ALIASES = (
     "GPS Lon", "GPS_Lon", "GPS Longitude", "GPS_Longitude",
 )
 
+# Substring fallbacks used when no exact alias matches. Mirrors the
+# looser matching Phase 1 Analytics uses, so FY25 device tabs with
+# nonstandard headers (e.g. "Approx Latitude", "Device Longitude")
+# still get picked up by the cron-side enrichment.
+_LAT_SUBSTRINGS = ("latitude", "lat")
+_LON_SUBSTRINGS = ("longitude", "lng", "lon")
+# Columns whose name contains one of these tokens should NOT be treated
+# as a longitude even if the word "lon" appears in them (long sentence
+# metadata, "long-term" flags, etc.).
+_LON_EXCLUDE_SUBSTRINGS = ("longevity", "long-term", "longterm")
+
 
 def _first_alias(df: pd.DataFrame, aliases: tuple[str, ...]) -> str | None:
     for a in aliases:
@@ -139,10 +150,31 @@ def _first_alias(df: pd.DataFrame, aliases: tuple[str, ...]) -> str | None:
     return None
 
 
+def _first_substring_match(
+    df: pd.DataFrame,
+    needles: tuple[str, ...],
+    *,
+    exclude: tuple[str, ...] = (),
+) -> str | None:
+    for c in df.columns:
+        cl = str(c).lower()
+        if any(x in cl for x in exclude):
+            continue
+        if any(n in cl for n in needles):
+            return c
+    return None
+
+
 def locate_geotemporal_columns(df: pd.DataFrame) -> tuple[str, str, str]:
     ts = _first_alias(df, _TIMESTAMP_ALIASES)
     lat = _first_alias(df, _LAT_ALIASES)
     lon = _first_alias(df, _LON_ALIASES)
+    # Substring fallbacks for sheets whose headers don't exactly match
+    # any known alias (e.g. FY25 "Approx Latitude"/"Approx Longitude").
+    if lat is None:
+        lat = _first_substring_match(df, _LAT_SUBSTRINGS)
+    if lon is None:
+        lon = _first_substring_match(df, _LON_SUBSTRINGS, exclude=_LON_EXCLUDE_SUBSTRINGS)
     if ts is None or lat is None or lon is None:
         raise RuntimeError(
             f"Sheet missing geo/time columns: timestamp={ts}, lat={lat}, lon={lon}"
