@@ -15,7 +15,7 @@ import os
 import re
 import string
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 import pandas as pd
 
@@ -32,6 +32,30 @@ DEFAULT_BATCH_SIZE = 100
 
 DEFAULT_EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
 _DEFAULT_SHEET_RE = re.compile(r"^Sheet\d+$")
+_T = TypeVar("_T")
+
+RETRYABLE_MARKERS = ("429", "Quota exceeded", "RESOURCE_EXHAUSTED")
+DEFAULT_RETRY_DELAYS_S = (2.0, 5.0, 10.0, 20.0)
+
+
+def _is_retryable_quota_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return any(marker in msg for marker in RETRYABLE_MARKERS)
+
+
+def _with_quota_retries(fn: Callable[[], _T], *, op: str) -> _T:
+    """Retry Google Sheets calls on quota/rate-limit errors."""
+    delays = DEFAULT_RETRY_DELAYS_S
+    for i in range(len(delays) + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_retryable_quota_error(exc) or i == len(delays):
+                raise
+            delay = delays[i]
+            log.warning("sheets_io: %s hit quota limit; retrying in %.1fs", op, delay)
+            time.sleep(delay)
+    raise RuntimeError(f"unreachable retry loop for op={op}")
 
 
 def load_credentials_from_env() -> Any:
@@ -82,9 +106,9 @@ def read_sheet_as_df(client, sheet_id: str, worksheet: str = "Sheet1") -> pd.Dat
     first data row = 2) so that later writes can target the correct
     cells regardless of filtering/sorting.
     """
-    sh = client.open_by_key(sheet_id)
-    ws = sh.worksheet(worksheet)
-    records = ws.get_all_records()
+    sh = _with_quota_retries(lambda: client.open_by_key(sheet_id), op="open_by_key(read)")
+    ws = _with_quota_retries(lambda: sh.worksheet(worksheet), op=f"worksheet({worksheet})")
+    records = _with_quota_retries(ws.get_all_records, op=f"get_all_records({worksheet})")
     if not records:
         return pd.DataFrame()
     df = pd.DataFrame(records)
@@ -94,9 +118,9 @@ def read_sheet_as_df(client, sheet_id: str, worksheet: str = "Sheet1") -> pd.Dat
 
 def worksheet_exists(client, sheet_id: str, worksheet: str) -> bool:
     """Return True if *worksheet* exists in the spreadsheet."""
-    sh = client.open_by_key(sheet_id)
+    sh = _with_quota_retries(lambda: client.open_by_key(sheet_id), op="open_by_key(exists)")
     try:
-        sh.worksheet(worksheet)
+        _with_quota_retries(lambda: sh.worksheet(worksheet), op=f"worksheet_exists({worksheet})")
         return True
     except Exception:
         return False
@@ -112,11 +136,11 @@ def list_data_worksheets(
     Excludes Google's default ``SheetN`` tabs and internal/non-source
     tabs such as ``_errors``, ``_devices``, and ``Derived_Daily``.
     """
-    sh = client.open_by_key(sheet_id)
+    sh = _with_quota_retries(lambda: client.open_by_key(sheet_id), op="open_by_key(list_tabs)")
     excluded = DEFAULT_EXCLUDED_TABS if exclude is None else exclude
     return [
         ws.title
-        for ws in sh.worksheets()
+        for ws in _with_quota_retries(sh.worksheets, op="worksheets()")
         if ws.title not in excluded and not _DEFAULT_SHEET_RE.match(ws.title)
     ]
 
@@ -141,14 +165,17 @@ def _ensure_header_columns(ws, columns: list[str]) -> dict[str, int]:
     Returns a mapping ``{column_name: 1-indexed_col_number}``.
     Missing columns are appended to the right of the existing header.
     """
-    header = ws.row_values(1)
+    header = _with_quota_retries(lambda: ws.row_values(1), op=f"row_values({ws.title})")
     col_to_idx: dict[str, int] = {name: i + 1 for i, name in enumerate(header) if name}
     missing = [c for c in columns if c not in col_to_idx]
     if missing:
         new_header = header + missing
         # Write the full header row to avoid gaps.
         cells_end = _col_letter(len(new_header))
-        ws.update(range_name=f"A1:{cells_end}1", values=[new_header])
+        _with_quota_retries(
+            lambda: ws.update(range_name=f"A1:{cells_end}1", values=[new_header]),
+            op=f"update_header({ws.title})",
+        )
         col_to_idx = {name: i + 1 for i, name in enumerate(new_header) if name}
     return col_to_idx
 
@@ -188,8 +215,8 @@ def write_enrichment_columns(
     if "_row" not in df.columns:
         raise ValueError("df must contain a '_row' column from read_sheet_as_df()")
 
-    sh = client.open_by_key(sheet_id)
-    ws = sh.worksheet(worksheet)
+    sh = _with_quota_retries(lambda: client.open_by_key(sheet_id), op="open_by_key(write)")
+    ws = _with_quota_retries(lambda: sh.worksheet(worksheet), op=f"worksheet({worksheet})")
 
     col_map = _ensure_header_columns(ws, cols)
     written = 0
@@ -212,11 +239,19 @@ def write_enrichment_columns(
             # per-row write per cell; otherwise use a single range.
             if batch_rows == list(range(batch_rows[0], batch_rows[-1] + 1)):
                 rng = f"{col_letter}{batch_rows[0]}:{col_letter}{batch_rows[-1]}"
-                ws.update(range_name=rng, values=[[_format_cell(v)] for v in batch_vals])
+                _with_quota_retries(
+                    lambda: ws.update(range_name=rng, values=[[_format_cell(v)] for v in batch_vals]),
+                    op=f"update_range({worksheet}:{rng})",
+                )
                 written += len(batch_vals)
             else:
                 for r, v in zip(batch_rows, batch_vals):
-                    ws.update(range_name=f"{col_letter}{r}", values=[[_format_cell(v)]])
+                    _with_quota_retries(
+                        lambda r=r, v=v: ws.update(
+                            range_name=f"{col_letter}{r}", values=[[_format_cell(v)]]
+                        ),
+                        op=f"update_cell({worksheet}:{col_letter}{r})",
+                    )
                     written += 1
             if sleep_between_batches:
                 time.sleep(sleep_between_batches)

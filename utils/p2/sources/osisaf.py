@@ -19,6 +19,7 @@ those latitudes — this avoids hitting OPeNDAP for every tropical row.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, datetime
 from typing import Any
 
@@ -50,9 +51,23 @@ def _dataset_url(hem: str, d: date) -> str:
 def _reproject(lat: float, lon: float, hem: str) -> tuple[float, float] | None:
     try:
         import pyproj
-    except Exception as exc:  # pragma: no cover
-        log.warning("pyproj not installed: %s", exc)
-        return None
+    except Exception:
+        lat_f = float(lat)
+        lon_f = float(lon)
+        lat_rad = math.radians(lat_f)
+        lon_rad = math.radians(lon_f)
+        radius = 6_378_273.0
+        if hem == "nh":
+            lon0 = math.radians(-45.0)
+            k = 2.0 / max(1e-12, 1.0 + math.sin(lat_rad))
+            x = radius * k * math.cos(lat_rad) * math.sin(lon_rad - lon0)
+            y = -radius * k * math.cos(lat_rad) * math.cos(lon_rad - lon0)
+        else:
+            lon0 = 0.0
+            k = 2.0 / max(1e-12, 1.0 - math.sin(lat_rad))
+            x = radius * k * math.cos(lat_rad) * math.sin(lon_rad - lon0)
+            y = radius * k * math.cos(lat_rad) * math.cos(lon_rad - lon0)
+        return float(x), float(y)
     crs = NH_CRS if hem == "nh" else SH_CRS
     transformer = pyproj.Transformer.from_crs("EPSG:4326", crs, always_xy=True)
     try:
