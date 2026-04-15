@@ -7,7 +7,7 @@ on:
     inputs:
       dry_run:
         description: 'Run without writing to Sheets'
-        default: 'true'
+        default: 'false'
 
 jobs:
   enrich:
@@ -23,4 +23,12 @@ jobs:
       - env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-        run: python scripts/backfill_enrichment.py --sources open_meteo_marine,open_meteo_historical --dry-run
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          python scripts/backfill_enrichment.py \
+            --sources open_meteo_marine,open_meteo_historical \
+            $DRY_FLAG

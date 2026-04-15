@@ -113,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if args.dry_run else 3
 
     try:
-        from utils.p2.sheets_io import load_credentials_from_env, read_sheet_as_df
+        from utils.p2.sheets_io import (
+            load_credentials_from_env,
+            read_sheet_as_df,
+            resolve_source_worksheets,
+        )
     except Exception as exc:
         print(f"[error] failed to import sheets_io: {exc}", file=sys.stderr)
         return 4
@@ -124,10 +128,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[error] {exc}", file=sys.stderr)
         return 5
 
-    df = read_sheet_as_df(client, sheet_id, worksheet=args.worksheet_source)
-    if df.empty:
-        print("[derived] source sheet is empty — nothing to compute.")
+    source_tabs = resolve_source_worksheets(client, sheet_id, args.worksheet_source)
+    if not source_tabs:
+        print(
+            f"[error] source worksheet '{args.worksheet_source}' not found and no device tabs detected.",
+            file=sys.stderr,
+        )
+        return 6
+    if args.worksheet_source == "Sheet1" and source_tabs != ["Sheet1"]:
+        print(f"[derived] Sheet1 missing; auto-detected device tabs: {source_tabs}")
+
+    frames: list[pd.DataFrame] = []
+    for tab in source_tabs:
+        tab_df = read_sheet_as_df(client, sheet_id, worksheet=tab)
+        if tab_df.empty:
+            print(f"[derived] source worksheet '{tab}' is empty — skipping.")
+            continue
+        tab_df = tab_df.copy()
+        tab_df["Device Tab"] = tab
+        frames.append(tab_df)
+
+    if not frames:
+        print("[derived] all source worksheets are empty — nothing to compute.")
         return 0
+    df = pd.concat(frames, ignore_index=True)
+    print(f"[derived] loaded {len(df)} rows from {len(frames)} source worksheets")
 
     window_df = filter_window(df, start, end)
     daily = compute_daily_table(window_df)

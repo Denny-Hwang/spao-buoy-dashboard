@@ -461,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         from utils.p2.sheets_io import (
             load_credentials_from_env,
             read_sheet_as_df,
+            resolve_source_worksheets,
             write_enrichment_columns,
         )
     except Exception as exc:
@@ -473,52 +474,78 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[error] {exc}", file=sys.stderr)
         return 5
 
-    df = read_sheet_as_df(client, sheet_id, worksheet=args.worksheet)
-    if df.empty:
-        print("[backfill] sheet is empty — nothing to do.")
-        return 0
-
-    df = ensure_enrichment_columns(df)
-    try:
-        ts_col, lat_col, lon_col = locate_geotemporal_columns(df)
-    except RuntimeError as exc:
-        print(f"[error] {exc}", file=sys.stderr)
-        return 6
-    window = filter_by_window(df, ts_col, args.start_date, args.end_date)
-
-    total_stats: dict[str, int] = {}
-    affected_columns: set[str] = set()
-    for src in requested:
-        bit = SOURCE_FLAG_BITS[src]
-        cand = rows_needing_source(df.loc[window], bit)
-        stats = {"candidates": len(cand)}
-        if args.dry_run:
-            groups = _group_rows(df, cand, ts_col, lat_col, lon_col,
-                                 bucket="H" if src.startswith("open_meteo") else "D")
-            stats["groups"] = len(groups)
-            print(f"[dry-run] {src}: would fetch {len(groups)} groups for {len(cand)} rows")
-        else:
-            filled = SOURCE_DISPATCH[src](df, cand, ts_col, lat_col, lon_col)
-            stats["filled"] = filled
-            affected_columns.update(SOURCE_COLUMNS.get(src, []))
-            if filled:
-                affected_columns.add("ENRICH_FLAG")
-        total_stats[src] = stats.get("filled", stats.get("groups", 0))
-
-    print_summary("enrichment stats", total_stats)
-
-    if args.dry_run:
-        print("[dry-run] no writes performed.")
-        return 0
-
-    if affected_columns:
-        cols = sorted(affected_columns)
-        print(f"[backfill] writing columns back to Sheets: {cols}")
-        write_enrichment_columns(
-            client, sheet_id, df, cols, worksheet=args.worksheet
+    source_tabs = resolve_source_worksheets(client, sheet_id, args.worksheet)
+    if not source_tabs:
+        print(
+            f"[error] source worksheet '{args.worksheet}' not found and no device tabs detected.",
+            file=sys.stderr,
         )
-    else:
-        print("[backfill] nothing to write.")
+        return 6
+    if args.worksheet == "Sheet1" and source_tabs != ["Sheet1"]:
+        print(f"[backfill] Sheet1 missing; auto-detected device tabs: {source_tabs}")
+
+    grand_totals: dict[str, int] = {src: 0 for src in requested}
+    tabs_processed = 0
+    tabs_with_rows = 0
+
+    for tab in source_tabs:
+        print(f"\n[backfill] processing worksheet: {tab}")
+        df = read_sheet_as_df(client, sheet_id, worksheet=tab)
+        tabs_processed += 1
+        if df.empty:
+            print(f"[backfill] worksheet '{tab}' is empty — skipping.")
+            continue
+        tabs_with_rows += 1
+
+        df = ensure_enrichment_columns(df)
+        try:
+            ts_col, lat_col, lon_col = locate_geotemporal_columns(df)
+        except RuntimeError as exc:
+            print(f"[error] worksheet '{tab}': {exc}", file=sys.stderr)
+            continue
+        window = filter_by_window(df, ts_col, args.start_date, args.end_date)
+
+        total_stats: dict[str, int] = {}
+        affected_columns: set[str] = set()
+        for src in requested:
+            bit = SOURCE_FLAG_BITS[src]
+            cand = rows_needing_source(df.loc[window], bit)
+            stats = {"candidates": len(cand)}
+            if args.dry_run:
+                groups = _group_rows(df, cand, ts_col, lat_col, lon_col,
+                                     bucket="H" if src.startswith("open_meteo") else "D")
+                stats["groups"] = len(groups)
+                print(f"[dry-run] {tab}/{src}: would fetch {len(groups)} groups for {len(cand)} rows")
+            else:
+                filled = SOURCE_DISPATCH[src](df, cand, ts_col, lat_col, lon_col)
+                stats["filled"] = filled
+                affected_columns.update(SOURCE_COLUMNS.get(src, []))
+                if filled:
+                    affected_columns.add("ENRICH_FLAG")
+            value = stats.get("filled", stats.get("groups", 0))
+            total_stats[src] = value
+            grand_totals[src] += value
+
+        print_summary(f"enrichment stats ({tab})", total_stats)
+
+        if args.dry_run:
+            continue
+
+        if affected_columns:
+            cols = sorted(affected_columns)
+            print(f"[backfill] writing columns back to '{tab}': {cols}")
+            write_enrichment_columns(
+                client, sheet_id, df, cols, worksheet=tab
+            )
+        else:
+            print(f"[backfill] worksheet '{tab}': nothing to write.")
+
+    print(f"\n[backfill] worksheets processed: {tabs_processed}, non-empty: {tabs_with_rows}")
+    print_summary("enrichment stats (all worksheets)", grand_totals)
+
+    if tabs_with_rows == 0:
+        print("[backfill] all source worksheets are empty — nothing to do.")
+        return 0
     return 0
 
 

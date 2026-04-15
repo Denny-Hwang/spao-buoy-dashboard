@@ -7,7 +7,7 @@ on:
     inputs:
       dry_run:
         description: 'Run without writing to Sheets'
-        default: 'true'
+        default: 'false'
       start_date:
         description: 'Inclusive start date (YYYY-MM-DD); blank = all missing'
         required: false
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           DRY_FLAG=""
-          if [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
             DRY_FLAG="--dry-run"
           fi
           START_FLAG=""
