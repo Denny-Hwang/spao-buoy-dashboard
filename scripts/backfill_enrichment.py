@@ -122,8 +122,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # DataFrame helpers
 # ──────────────────────────────────────────────────────────────────────
 _TIMESTAMP_ALIASES = ("Timestamp", "Receive Time", "Date Time (UTC)", "Date Time", "Time")
-_LAT_ALIASES = ("Lat", "Latitude", "lat", "GPS Lat", "GPS_Lat")
-_LON_ALIASES = ("Lon", "Lng", "Longitude", "lon", "GPS Lon", "GPS_Lon")
+_LAT_ALIASES = ("Lat", "Latitude", "lat", "Lat (°)", "GPS Lat", "GPS_Lat")
+_LON_ALIASES = ("Lon", "Lng", "Longitude", "lon", "Lon (°)", "GPS Lon", "GPS_Lon")
 
 
 def _first_alias(df: pd.DataFrame, aliases: tuple[str, ...]) -> str | None:
