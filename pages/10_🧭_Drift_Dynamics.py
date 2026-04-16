@@ -1,5 +1,5 @@
 """
-Page 9 — Drift Dynamics.
+Page 10 — Drift Dynamics.
 
 Three sections, selected via main-area tabs:
     C1 Trajectory, C2 Ekman decomposition, C3 Storm Response.

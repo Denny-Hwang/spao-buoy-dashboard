@@ -1,5 +1,5 @@
 """
-Page 7 — TENG Performance.
+Page 8 — TENG Performance.
 
 Wave-to-power transfer function and normalized-power trend panels.
 All analysis functions live in ``utils.p2.viz.teng_panels`` so this

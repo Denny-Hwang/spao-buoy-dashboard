@@ -1,5 +1,5 @@
 """
-Page 8 — SST Validation.
+Page 9 — SST Validation.
 
 The page now mirrors the Phase 1 Analytics layout:
 
@@ -263,13 +263,20 @@ with tab_b1:
     )
 
     with st.expander("ℹ️  What does each SST product mean? (source · resolution · known bias)"):
-        for name, info in _PRODUCT_INFO.items():
-            st.markdown(
-                f"**{name}** — *{info['source']}*  \n"
-                f"&nbsp;&nbsp;&nbsp;• Access: {info['access']}  \n"
-                f"&nbsp;&nbsp;&nbsp;• Resolution: {info['resolution']}  \n"
-                f"&nbsp;&nbsp;&nbsp;• Known bias: {info['bias']}"
+        if not _PRODUCT_INFO:
+            st.caption(
+                "Product info not available in the currently loaded module "
+                "build. See the 📖 Phase 2 Overview page for the full product "
+                "reference."
             )
+        else:
+            for name, info in _PRODUCT_INFO.items():
+                st.markdown(
+                    f"**{name}** — *{info.get('source', '')}*  \n"
+                    f"&nbsp;&nbsp;&nbsp;• Access: {info.get('access', '—')}  \n"
+                    f"&nbsp;&nbsp;&nbsp;• Resolution: {info.get('resolution', '—')}  \n"
+                    f"&nbsp;&nbsp;&nbsp;• Known bias: {info.get('bias', '—')}"
+                )
 
     show_internal = st.checkbox(
         "Overlay buoy internal temperature (hull thermistor)",
@@ -292,8 +299,10 @@ with tab_b1:
             "std_diff": "{:+.3f}", "correlation": "{:.3f}",
         }), use_container_width=True)
 
-        st.markdown(f"*{_DESC.get('pairwise_bias', '')}*")
-        st.plotly_chart(_build_pairwise_bias_bar_safe(df), use_container_width=True)
+        _bias_fig = _build_pairwise_bias_bar_safe(df)
+        if _bias_fig is not None:
+            st.markdown(f"*{_DESC.get('pairwise_bias', '')}*")
+            st.plotly_chart(_bias_fig, use_container_width=True)
 
         col_left, col_right = st.columns(2)
         with col_left:

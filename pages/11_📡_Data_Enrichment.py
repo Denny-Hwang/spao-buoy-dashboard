@@ -1,5 +1,5 @@
 """
-Page 10 — Data Enrichment admin / QC.
+Page 11 — Data Enrichment admin / QC.
 
 Shows enrichment coverage, source health, a (gated) manual backfill
 trigger, and QC flags for the current data.
