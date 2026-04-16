@@ -27,6 +27,17 @@ _TENG_POWER_ALIASES = (
 _TENG_VOLT_ALIASES = ("TENG_V", "TENG V", "TENG_Voltage", "TENG_V_V", "TENG_Vrms")
 _TENG_CURR_ALIASES = ("TENG_I", "TENG I", "TENG_Current", "TENG_I_A", "TENG_Irms")
 
+# FY25/FY26 buoy packets do not carry a TENG voltage sensor, but the
+# battery voltage is available and the TENG output is rectified into
+# the battery node — so ``Battery [V] × TENG_Current_Avg [mA]`` is a
+# first-order proxy for instantaneous TENG power in mW. This fallback
+# is used only when no direct power or V[V]*I[A] pair is available.
+_BATTERY_VOLT_ALIASES = ("Battery", "Battery (V)", "Battery_V", "Bat V", "BatV")
+_TENG_CURR_MA_ALIASES = (
+    "TENG Current Avg", "TENG_Current_Avg", "TENG Current",
+    "TENG_I_mA", "TENG I mA",
+)
+
 _HS_ALIASES = ("Hs", "Hs_m", "WAVE_H_m", "wave_height", "WAVE_H_cm")
 _TP_ALIASES = ("Tp", "Tp_s", "WAVE_T_s", "wave_period", "WAVE_T_ds")
 
@@ -50,9 +61,13 @@ def teng_power_mw(df: pd.DataFrame) -> pd.Series:
 
     Resolution order:
         1. Any column in ``_TENG_POWER_ALIASES`` — used as-is.
-        2. Derived ``V * I * 1000`` if voltage and current columns exist
-           (W → mW conversion).
-        3. All-NaN series the length of ``df``.
+        2. ``V [V] * I [A] * 1000`` if dedicated TENG voltage/current
+           columns (ampere-scale) exist.
+        3. FY25/FY26 fallback: ``Battery [V] * TENG Current Avg [mA]``
+           — numerically equals P in mW because ``V·A = W`` ⇒
+           ``V·mA = mW`` directly. This covers buoys that only ship
+           battery voltage + TENG current (no dedicated TENG voltage).
+        4. All-NaN series the length of ``df``.
     """
     p = _series(df, _TENG_POWER_ALIASES)
     if p is not None:
@@ -61,6 +76,10 @@ def teng_power_mw(df: pd.DataFrame) -> pd.Series:
     i = _series(df, _TENG_CURR_ALIASES)
     if v is not None and i is not None:
         return (v * i * 1000.0).rename("TENG_P_mW")
+    v_bat = _series(df, _BATTERY_VOLT_ALIASES)
+    i_ma = _series(df, _TENG_CURR_MA_ALIASES)
+    if v_bat is not None and i_ma is not None:
+        return (v_bat * i_ma).rename("TENG_P_mW")
     return pd.Series(np.nan, index=df.index, name="TENG_P_mW")
 
 
