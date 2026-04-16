@@ -127,11 +127,14 @@ def inject_custom_css():
     }
 
     /* ── Phase 1 / Phase 2 section separators in the sidebar nav ── */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]) {
+    /* PHASE 1 banner: attach to the first Phase 1 page (Overview) but
+       explicitly EXCLUDE the new Phase 2 Overview page whose href also
+       contains the word "Overview". */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])) {
         position: relative;
         margin-top: 6px;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"])::before {
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"]))::before {
         content: "PHASE 1 — OPERATIONAL";
         display: block;
         font-size: 10px;
@@ -140,13 +143,16 @@ def inject_custom_css():
         color: #5A5A5A;
         padding: 6px 1rem 4px 1rem;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="TENG_Performance"]) {
+    /* PHASE 2 banner: now anchored on Phase2_Overview (the first Phase 2
+       page in sidebar order) rather than TENG_Performance, so the "📖
+       Phase2 Overview" entry renders BELOW the Phase 2 section bar. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"]) {
         position: relative;
         margin-top: 14px;
         padding-top: 12px;
         border-top: 2px solid #003E6B;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="TENG_Performance"])::before {
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"])::before {
         content: "PHASE 2 — SCIENTIFIC";
         display: block;
         font-size: 10px;

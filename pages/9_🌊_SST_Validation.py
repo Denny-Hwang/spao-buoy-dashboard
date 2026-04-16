@@ -66,15 +66,36 @@ raw_df = _load_data()
 
 try:
     panels = importlib.import_module("utils.p2.viz.sst_panels")
+    # Force reload so new attributes added in later deploys (DESCRIPTIONS,
+    # PRODUCT_INFO, build_pairwise_bias_bar, …) are always picked up even
+    # if Streamlit Cloud has cached an older module object.
+    panels = importlib.reload(panels)
 except Exception as exc:  # noqa: BLE001
     panels = None
     st.error(f"Failed to load SST panels: {exc}")
 
 try:
     sensor_overview = importlib.import_module("utils.p2.viz.sensor_overview")
+    sensor_overview = importlib.reload(sensor_overview)
 except Exception as exc:  # noqa: BLE001
     sensor_overview = None
     st.caption(f"Sensor overview unavailable: {exc}")
+
+# Defensive: older cached module versions did not expose DESCRIPTIONS /
+# PRODUCT_INFO / build_pairwise_bias_bar. Resolve them via getattr with
+# graceful fallbacks so a stale module never crashes the page.
+_DESC: dict = getattr(panels, "DESCRIPTIONS", {}) or {}
+_PRODUCT_INFO: dict = getattr(panels, "PRODUCT_INFO", {}) or {}
+
+
+def _build_pairwise_bias_bar_safe(frame):
+    fn = getattr(panels, "build_pairwise_bias_bar", None)
+    if fn is None:
+        return None
+    try:
+        return fn(frame)
+    except Exception:  # noqa: BLE001
+        return None
 
 # ── Shared device + date-range toolbar ────────────────────────────────
 try:
@@ -242,7 +263,7 @@ with tab_b1:
     )
 
     with st.expander("ℹ️  What does each SST product mean? (source · resolution · known bias)"):
-        for name, info in panels.PRODUCT_INFO.items():
+        for name, info in _PRODUCT_INFO.items():
             st.markdown(
                 f"**{name}** — *{info['source']}*  \n"
                 f"&nbsp;&nbsp;&nbsp;• Access: {info['access']}  \n"
@@ -264,31 +285,31 @@ with tab_b1:
     if not per_row_ready:
         st.warning(_b_warning)
     else:
-        st.markdown(f"*{panels.DESCRIPTIONS['metrics_table']}*")
+        st.markdown(f"*{_DESC.get('metrics_table', '')}*")
         metrics = panels.build_metrics_table(df)
         st.dataframe(metrics.style.format({
             "bias": "{:+.3f}", "rmse": "{:.3f}", "uRMSE": "{:.3f}",
             "std_diff": "{:+.3f}", "correlation": "{:.3f}",
         }), use_container_width=True)
 
-        st.markdown(f"*{panels.DESCRIPTIONS['pairwise_bias']}*")
-        st.plotly_chart(panels.build_pairwise_bias_bar(df), use_container_width=True)
+        st.markdown(f"*{_DESC.get('pairwise_bias', '')}*")
+        st.plotly_chart(_build_pairwise_bias_bar_safe(df), use_container_width=True)
 
         col_left, col_right = st.columns(2)
         with col_left:
-            st.markdown(f"*{panels.DESCRIPTIONS['taylor']}*")
+            st.markdown(f"*{_DESC.get('taylor', '')}*")
             st.plotly_chart(panels.build_taylor(df), use_container_width=True)
         with col_right:
-            st.markdown(f"*{panels.DESCRIPTIONS['target']}*")
+            st.markdown(f"*{_DESC.get('target', '')}*")
             st.plotly_chart(panels.build_target(df), use_container_width=True)
 
-        st.markdown(f"*{panels.DESCRIPTIONS['timeseries']}*")
+        st.markdown(f"*{_DESC.get('timeseries', '')}*")
         st.plotly_chart(
             panels.build_sst_timeseries(df, include_internal_temp=show_internal),
             use_container_width=True,
         )
 
-        st.markdown(f"*{panels.DESCRIPTIONS['residual_hist']}*")
+        st.markdown(f"*{_DESC.get('residual_hist', '')}*")
         st.plotly_chart(panels.build_residual_histogram(df), use_container_width=True)
 
 with tab_b2:
@@ -302,7 +323,7 @@ with tab_b2:
     if not per_row_ready:
         st.warning(_b_warning)
     else:
-        st.markdown(f"*{panels.DESCRIPTIONS['drift_ts']}*")
+        st.markdown(f"*{_DESC.get('drift_ts', '')}*")
         drift = panels.build_drift_timeseries(df)
         st.plotly_chart(drift["fig"], use_container_width=True)
 
@@ -313,9 +334,9 @@ with tab_b2:
         else:
             col2.success("🟢 No drift alarm")
 
-        st.markdown(f"*{panels.DESCRIPTIONS['drift_box']}*")
+        st.markdown(f"*{_DESC.get('drift_box', '')}*")
         st.plotly_chart(panels.build_drift_boxplot(df), use_container_width=True)
-        st.markdown(f"*{panels.DESCRIPTIONS['cusum']}*")
+        st.markdown(f"*{_DESC.get('cusum', '')}*")
         st.plotly_chart(panels.build_cusum_chart(df), use_container_width=True)
 
 with tab_b3:
@@ -344,12 +365,12 @@ with tab_b3:
         if clear_sky and "ERA5_CLOUD_COVER" in df.columns:
             df_view = df[df["ERA5_CLOUD_COVER"] < 30]
 
-        st.markdown(f"*{panels.DESCRIPTIONS['diurnal']}*")
+        st.markdown(f"*{_DESC.get('diurnal', '')}*")
         st.plotly_chart(
             panels.build_diurnal_composite(df_view, include_internal_temp=b3_internal),
             use_container_width=True,
         )
-        st.markdown(f"*{panels.DESCRIPTIONS['amplitude_vs_wind']}*")
+        st.markdown(f"*{_DESC.get('amplitude_vs_wind', '')}*")
         st.plotly_chart(panels.build_amplitude_vs_wind(df_view), use_container_width=True)
         st.caption("Kawai & Wada (2007) overlay is a qualitative envelope.")
 
