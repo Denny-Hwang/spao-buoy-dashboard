@@ -150,7 +150,7 @@ def test_b3_diurnal_panels():
     assert sst_panels.build_amplitude_vs_wind(df) is not None
 
 
-def test_page8_importable_under_stub():
-    page = PAGES_DIR / "8_🌊_SST_Validation.py"
+def test_page_sst_importable_under_stub():
+    page = PAGES_DIR / "9_🌊_SST_Validation.py"
     assert page.exists()
     _load_module(page, "_page_8_sst")
