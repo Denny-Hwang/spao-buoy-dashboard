@@ -150,6 +150,7 @@ SOURCE_COLUMNS = {
     "WAVE (Open-Meteo)":        ["WAVE_H_cm", "WAVE_T_ds"],
     "WIND (Open-Meteo)":        ["WIND_SPD_cms", "WIND_DIR_deg"],
     "ERA5 atmospheric":         ["ERA5_PRES_dPa", "ERA5_AIRT_cC"],
+    "Open-Meteo SST (coastal)": ["SAT_SST_OPENMETEO_cC"],
     "NOAA OISST":               ["SAT_SST_OISST_cC"],
     "MUR SST":                  ["SAT_SST_MUR_cC"],
     "OSTIA (Copernicus)":       ["SAT_SST_OSTIA_cC"],

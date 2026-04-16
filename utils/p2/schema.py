@@ -42,6 +42,11 @@ ENRICHED_COLUMNS: dict[str, tuple[str, float, str, str]] = {
     "SAT_SST_ERA5_cC":  ("int16", 100.0,  "degC",    "era5_sst"),
     "SAT_SST_MUR_cC":   ("int16", 100.0,  "degC",    "mur_sst"),
     "SAT_SST_OSTIA_cC": ("int16", 100.0,  "degC",    "ostia"),
+    # Open-Meteo general weather-API reference: covers coastal / inland
+    # points where satellite SST products are masked (e.g. Richland, WA
+    # river deployment). Over ocean uses Marine `sea_surface_temperature`;
+    # over land falls back to ERA5-Land `soil_temperature_0cm`.
+    "SAT_SST_OPENMETEO_cC": ("int16", 100.0, "degC",  "open_meteo_sst"),
     # Surface currents (OSCAR)
     "OSCAR_U_mms":      ("int16", 1000.0, "m/s",     "oscar"),
     "OSCAR_V_mms":      ("int16", 1000.0, "m/s",     "oscar"),
@@ -64,6 +69,7 @@ class EnrichFlag(IntFlag):
     OSCAR = 64
     SEAICE = 128
     ERA5_SST = 256
+    OPEN_METEO_SST = 512
 
 
 FULL_ENRICHED_FLAG: EnrichFlag = (
@@ -76,6 +82,7 @@ FULL_ENRICHED_FLAG: EnrichFlag = (
     | EnrichFlag.OSCAR
     | EnrichFlag.SEAICE
     | EnrichFlag.ERA5_SST
+    | EnrichFlag.OPEN_METEO_SST
 )
 
 
@@ -93,6 +100,7 @@ ENRICH_COLUMN_ORDER: list[str] = [
     "SAT_SST_ERA5_cC",
     "SAT_SST_MUR_cC",
     "SAT_SST_OSTIA_cC",
+    "SAT_SST_OPENMETEO_cC",
     "OSCAR_U_mms",
     "OSCAR_V_mms",
     "SEAICE_CONC_pct",

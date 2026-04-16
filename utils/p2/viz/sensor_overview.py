@@ -117,10 +117,11 @@ ENRICHED_GROUPS: list[dict] = [
             # gets an explicit dual-axis comparison per the style rule.
             # Secondary axis is range-linked to primary in the builder
             # below so the °C values stay directly comparable.
-            ("SAT_SST_OISST_cC", "OISST",  "°C", 100.0, "y"),
-            ("SAT_SST_MUR_cC",   "MUR",    "°C", 100.0, "y2"),
-            ("SAT_SST_OSTIA_cC", "OSTIA",  "°C", 100.0, "y2"),
-            ("SAT_SST_ERA5_cC",  "ERA5",   "°C", 100.0, "y2"),
+            ("SAT_SST_OISST_cC",    "OISST",     "°C", 100.0, "y"),
+            ("SAT_SST_MUR_cC",      "MUR",       "°C", 100.0, "y2"),
+            ("SAT_SST_OSTIA_cC",    "OSTIA",     "°C", 100.0, "y2"),
+            ("SAT_SST_ERA5_cC",     "ERA5",      "°C", 100.0, "y2"),
+            ("SAT_SST_OPENMETEO_cC","OpenMeteo", "°C", 100.0, "y2"),
         ],
         "y_label": "OISST (°C)",
         "y2_label": "Other SST products (°C)",

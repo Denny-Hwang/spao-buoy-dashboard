@@ -29,10 +29,11 @@ from ..viz.diagrams import target_diagram
 
 # Candidate column names for each reference product.
 PRODUCT_ALIASES: dict[str, tuple[str, ...]] = {
-    "OISST":  ("SAT_SST_OISST", "SAT_SST_OISST_cC"),
-    "ERA5":   ("SAT_SST_ERA5",  "SAT_SST_ERA5_cC"),
-    "MUR":    ("SAT_SST_MUR",   "SAT_SST_MUR_cC"),
-    "OSTIA":  ("SAT_SST_OSTIA", "SAT_SST_OSTIA_cC"),
+    "OISST":     ("SAT_SST_OISST",    "SAT_SST_OISST_cC"),
+    "ERA5":      ("SAT_SST_ERA5",     "SAT_SST_ERA5_cC"),
+    "MUR":       ("SAT_SST_MUR",      "SAT_SST_MUR_cC"),
+    "OSTIA":     ("SAT_SST_OSTIA",    "SAT_SST_OSTIA_cC"),
+    "OpenMeteo": ("SAT_SST_OPENMETEO", "SAT_SST_OPENMETEO_cC"),
 }
 
 BUOY_SST_ALIASES = ("SST_buoy", "sst_buoy", "SST", "Water Temp", "Water_Temp", "WaterTemp")
@@ -88,10 +89,11 @@ def build_metrics_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 _PRODUCT_COLORS: dict[str, str] = {
-    "OISST":  "#0078D4",   # PNNL accent blue
-    "MUR":    "#C62828",   # Red
-    "OSTIA":  "#2E7D32",   # Green
-    "ERA5":   "#F0AB00",   # Battelle orange
+    "OISST":     "#0078D4",   # PNNL accent blue
+    "MUR":       "#C62828",   # Red
+    "OSTIA":     "#2E7D32",   # Green
+    "ERA5":      "#F0AB00",   # Battelle orange
+    "OpenMeteo": "#5E35B1",   # Purple (coastal / inland fallback)
 }
 
 

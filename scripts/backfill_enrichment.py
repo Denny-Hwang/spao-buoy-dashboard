@@ -46,6 +46,7 @@ log = logging.getLogger("backfill")
 ALL_SOURCES = [
     "open_meteo_marine",
     "open_meteo_historical",
+    "open_meteo_sst",
     "noaa_oisst",
     "mur_sst",
     "ostia",
@@ -57,6 +58,7 @@ ALL_SOURCES = [
 SOURCE_FLAG_BITS: dict[str, EnrichFlag] = {
     "open_meteo_marine": EnrichFlag.WAVE,
     "open_meteo_historical": EnrichFlag.WIND | EnrichFlag.ERA5_ATMOS,
+    "open_meteo_sst": EnrichFlag.OPEN_METEO_SST,
     "noaa_oisst": EnrichFlag.OISST,
     "mur_sst": EnrichFlag.MUR,
     "ostia": EnrichFlag.OSTIA,
@@ -77,6 +79,7 @@ SOURCE_COLUMNS: dict[str, list[str]] = {
     "open_meteo_historical": [
         "WIND_SPD_cms", "WIND_DIR_deg", "ERA5_PRES_dPa", "ERA5_AIRT_cC",
     ],
+    "open_meteo_sst": ["SAT_SST_OPENMETEO_cC"],
     "noaa_oisst": ["SAT_SST_OISST_cC"],
     "mur_sst": ["SAT_SST_MUR_cC"],
     "ostia": ["SAT_SST_OSTIA_cC"],
@@ -421,6 +424,46 @@ def enrich_open_meteo_marine(
     return filled
 
 
+def enrich_open_meteo_sst(
+    df: pd.DataFrame, rows: pd.Index, ts_col: str, lat_col: str, lon_col: str
+) -> int:
+    """Populate ``SAT_SST_OPENMETEO_cC`` from the unified Open-Meteo
+    surface-temperature fetcher.
+
+    Prefers the Marine API ``sea_surface_temperature`` and falls back to
+    the Archive API's ``soil_temperature_0cm`` so inland / coastal points
+    (Richland WA test deployment etc.) still receive a usable reference
+    value instead of blank cells.
+    """
+    from utils.p2.sources.open_meteo import fetch_openmeteo_sst_point
+
+    groups = _group_rows(df, rows, ts_col, lat_col, lon_col, bucket="H")
+    filled = 0
+    by_day: dict[tuple[float, float, pd.Timestamp], list[int]] = {}
+    for (lat, lon, hour), idxs in groups.items():
+        day_key = (lat, lon, hour.floor("D"))
+        by_day.setdefault(day_key, []).extend(idxs)
+
+    for (lat, lon, day), idxs in by_day.items():
+        frame = fetch_openmeteo_sst_point(lat, lon, day, day)
+        if frame is None or frame.empty:
+            continue
+        for idx in idxs:
+            ts = _coerce_ts(df.at[idx, ts_col])
+            if pd.isna(ts):
+                continue
+            hour = time_bucket(ts, "H")
+            if hour not in frame.index:
+                continue
+            val = frame.loc[hour, "sst_c"]
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                continue
+            _set_cells(df, [idx], {"SAT_SST_OPENMETEO_cC": val})
+            _or_flag(df, [idx], EnrichFlag.OPEN_METEO_SST)
+            filled += 1
+    return filled
+
+
 def enrich_open_meteo_historical(
     df: pd.DataFrame, rows: pd.Index, ts_col: str, lat_col: str, lon_col: str
 ) -> int:
@@ -544,6 +587,7 @@ def _register_default_dispatch() -> None:
 
     SOURCE_DISPATCH["open_meteo_marine"] = enrich_open_meteo_marine
     SOURCE_DISPATCH["open_meteo_historical"] = enrich_open_meteo_historical
+    SOURCE_DISPATCH["open_meteo_sst"] = enrich_open_meteo_sst
     SOURCE_DISPATCH["noaa_oisst"] = (
         lambda df, rows, ts, la, lo: enrich_erddap_point(
             df, rows, ts, la, lo, fetch_oisst_point, "SAT_SST_OISST_cC", EnrichFlag.OISST
