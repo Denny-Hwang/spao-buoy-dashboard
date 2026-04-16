@@ -36,6 +36,35 @@ from ..stats.trends import mann_kendall, theil_sen
 JUNG_2024 = {"label": "Jung 2024", "Hs": 0.3, "Tp": 2.19, "P_mW": 6.3, "color": "royalblue"}
 LU_2026 = {"label": "Lu 2026", "Hs": 3.1, "Tp": 7.0, "P_mW": 12.2, "color": "crimson"}
 
+# One-line descriptions of what each panel answers, surfaced in the
+# Streamlit page directly above the figure so operators do not need to
+# dig through docstrings to understand the visualization.
+DESCRIPTIONS: dict[str, str] = {
+    "hs_tp_heatmap": (
+        "Mean TENG power per Hs-Tp bin — shows which sea states produce the "
+        "most electrical output on this buoy."
+    ),
+    "loglog_hs2tp": (
+        "Log-log power vs Hs²·Tp — a slope near 1 confirms the TENG tracks "
+        "the linear wave-energy proxy across the observed sea states."
+    ),
+    "flux_scatter": (
+        "TENG power vs Falnes (2002) theoretical wave energy flux — the fit "
+        "slope is the effective capture width of the buoy (W/W per metre)."
+    ),
+    "eta_trend": (
+        "Sea-state-normalized TENG power over time with Theil-Sen trend and "
+        "Mann-Kendall test — flat η through the deployment indicates the "
+        "generator is not degrading independently of the wave climate."
+    ),
+    "week_violin": (
+        "First-week vs last-week η distribution — paired comparison that "
+        "highlights regime changes that a slope-only fit could miss."
+    ),
+}
+
+_PLOT_HEIGHT = 560
+
 
 def _require_plotly() -> None:
     if go is None:  # pragma: no cover
@@ -92,24 +121,42 @@ def build_hs_tp_heatmap(df: pd.DataFrame) -> Any:
             x=0.5 * (hs_bins[:-1] + hs_bins[1:]),
             y=0.5 * (tp_bins[:-1] + tp_bins[1:]),
             colorscale="Viridis",
-            colorbar=dict(title="P_TENG (mW)"),
+            colorbar=dict(
+                title=dict(text="P_TENG (mW)", font=dict(size=14)),
+                x=1.06, len=0.85, thickness=18, tickfont=dict(size=12),
+            ),
         )
     )
-    for ref in (JUNG_2024, LU_2026):
+    # Reference markers at the bottom right so labels don't clash with
+    # the colorbar title. Text below the star keeps it legible on the
+    # saturated backdrop and sidesteps the previous top-center overlap.
+    for ref, textpos in ((JUNG_2024, "bottom right"), (LU_2026, "bottom left")):
         fig.add_trace(
             go.Scatter(
                 x=[ref["Hs"]], y=[ref["Tp"]],
                 mode="markers+text",
-                marker=dict(symbol="star", size=16, color=ref["color"],
-                            line=dict(width=1, color="white")),
-                text=[f"{ref['label']} ({ref['P_mW']:.1f} mW)"],
-                textposition="top center",
+                marker=dict(symbol="star", size=18, color=ref["color"],
+                            line=dict(width=1.5, color="white")),
+                text=[f"{ref['label']}  {ref['P_mW']:.1f} mW"],
+                textposition=textpos,
+                textfont=dict(size=12, color="white"),
                 name=ref["label"],
+                hovertemplate=f"{ref['label']}<br>Hs={ref['Hs']} m<br>"
+                              f"Tp={ref['Tp']} s<br>P={ref['P_mW']} mW<extra></extra>",
             )
         )
     fig.update_layout(
-        title="TENG power vs sea state (Hs × Tp)",
-        xaxis_title="Hs (m)", yaxis_title="Tp (s)",
+        title=dict(text="TENG power vs sea state (Hs × Tp)", font=dict(size=20)),
+        xaxis=dict(title=dict(text="Hs (m)", font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="Tp (s)", font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        height=_PLOT_HEIGHT,
+        margin=dict(l=60, r=110, t=60, b=55),
+        plot_bgcolor="white", paper_bgcolor="white",
+        legend=dict(font=dict(size=12), yanchor="top", y=0.98,
+                    xanchor="left", x=0.01,
+                    bgcolor="rgba(255,255,255,0.7)"),
     )
     return fig
 
@@ -149,9 +196,17 @@ def build_loglog_hs2tp(df: pd.DataFrame) -> Any:
                 line=dict(color="black", dash="dash", width=2),
             ))
     fig.update_layout(
-        title="P_TENG vs Hs² · Tp (log-log)",
-        xaxis=dict(title="Hs² · Tp (m²·s)", type="log"),
-        yaxis=dict(title="P_TENG (mW)", type="log"),
+        title=dict(text="P_TENG vs Hs² · Tp (log-log)", font=dict(size=20)),
+        xaxis=dict(title=dict(text="Hs² · Tp (m²·s)", font=dict(size=15)),
+                   type="log", tickfont=dict(size=13),
+                   showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="P_TENG (mW)", font=dict(size=15)),
+                   type="log", tickfont=dict(size=13),
+                   showgrid=True, gridcolor="#e5e7eb"),
+        height=_PLOT_HEIGHT,
+        margin=dict(l=65, r=30, t=60, b=55),
+        plot_bgcolor="white", paper_bgcolor="white",
+        legend=dict(font=dict(size=12)),
     )
     return fig
 
@@ -182,9 +237,15 @@ def build_flux_scatter(df: pd.DataFrame) -> Any:
             name=f"Fit  slope={coef[0]:.2e}",
         ))
     fig.update_layout(
-        title="P_TENG vs theoretical wave flux",
-        xaxis_title="Wave energy flux (W/m)",
-        yaxis_title="P_TENG (mW)",
+        title=dict(text="P_TENG vs theoretical wave flux", font=dict(size=20)),
+        xaxis=dict(title=dict(text="Wave energy flux (W/m)", font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="P_TENG (mW)", font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        height=_PLOT_HEIGHT,
+        margin=dict(l=65, r=30, t=60, b=55),
+        plot_bgcolor="white", paper_bgcolor="white",
+        legend=dict(font=dict(size=12)),
     )
     return fig
 
@@ -256,8 +317,15 @@ def build_eta_trend(df: pd.DataFrame, level: int = 2, ts_col: str = "Timestamp")
             name=f"Theil-Sen slope={ts_fit['slope']:.3g}/day",
         ))
     fig.update_layout(
-        title=_LEVEL_LABEL[level],
-        xaxis_title="Time", yaxis_title=_LEVEL_LABEL[level],
+        title=dict(text=_LEVEL_LABEL[level], font=dict(size=20)),
+        xaxis=dict(title=dict(text="Time", font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text=_LEVEL_LABEL[level], font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        height=_PLOT_HEIGHT,
+        margin=dict(l=65, r=30, t=60, b=55),
+        plot_bgcolor="white", paper_bgcolor="white",
+        legend=dict(font=dict(size=12)),
     )
     return {
         "fig": fig,
@@ -299,8 +367,15 @@ def build_week_violin(df: pd.DataFrame, level: int = 1, ts_col: str = "Timestamp
             line_color=color,
         ))
     fig.update_layout(
-        title=f"Matched-pair η_{level} — first vs last week",
-        yaxis_title=_LEVEL_LABEL[level],
+        title=dict(text=f"Matched-pair η_{level} — first vs last week",
+                   font=dict(size=20)),
+        xaxis=dict(tickfont=dict(size=13)),
+        yaxis=dict(title=dict(text=_LEVEL_LABEL[level], font=dict(size=15)),
+                   tickfont=dict(size=13), showgrid=True, gridcolor="#e5e7eb"),
+        height=_PLOT_HEIGHT,
+        margin=dict(l=65, r=30, t=60, b=55),
+        plot_bgcolor="white", paper_bgcolor="white",
+        legend=dict(font=dict(size=12)),
     )
     return fig
 
@@ -333,6 +408,7 @@ def compute_kpis(df: pd.DataFrame) -> dict:
 __all__ = [
     "JUNG_2024",
     "LU_2026",
+    "DESCRIPTIONS",
     "build_hs_tp_heatmap",
     "build_loglog_hs2tp",
     "build_flux_scatter",

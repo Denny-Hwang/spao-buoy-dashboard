@@ -123,3 +123,55 @@ def test_fetch_marine_bad_json_returns_empty():
         m.get(om.MARINE_URL, text="not json at all")
         df = om.fetch_marine_point(1, 2, "2025-09-09", "2025-09-09")
     assert df.empty
+
+
+# ─── Open-Meteo unified SST fetcher (marine → land fallback) ──────────
+_MARINE_SST_ONLY = {
+    "hourly": {
+        "time": ["2025-09-09T00:00", "2025-09-09T01:00"],
+        "sea_surface_temperature": [10.1, 10.2],
+    },
+}
+
+_LAND_SOIL_ONLY = {
+    "hourly": {
+        "time": ["2025-09-09T00:00", "2025-09-09T01:00"],
+        "soil_temperature_0cm": [18.5, 18.9],
+    },
+}
+
+_MARINE_ALL_NAN = {
+    "hourly": {
+        "time": ["2025-09-09T00:00", "2025-09-09T01:00"],
+        "sea_surface_temperature": [None, None],
+    },
+}
+
+
+def test_openmeteo_sst_prefers_marine_when_present():
+    with requests_mock.Mocker() as m:
+        m.get(om.MARINE_URL, json=_MARINE_SST_ONLY)
+        m.get(om.ARCHIVE_URL, json=_LAND_SOIL_ONLY)
+        df = om.fetch_openmeteo_sst_point(0.0, 0.0, "2025-09-09", "2025-09-09")
+    assert list(df.columns) == ["sst_c"]
+    # Marine takes priority wherever it is non-NaN.
+    assert df["sst_c"].iloc[0] == pytest.approx(10.1)
+    assert df["sst_c"].iloc[1] == pytest.approx(10.2)
+
+
+def test_openmeteo_sst_falls_back_to_land_soil_temperature():
+    with requests_mock.Mocker() as m:
+        m.get(om.MARINE_URL, json=_MARINE_ALL_NAN)
+        m.get(om.ARCHIVE_URL, json=_LAND_SOIL_ONLY)
+        df = om.fetch_openmeteo_sst_point(46.3, -119.3, "2025-09-09", "2025-09-09")
+    assert not df.empty
+    assert df["sst_c"].iloc[0] == pytest.approx(18.5)
+    assert df["sst_c"].iloc[1] == pytest.approx(18.9)
+
+
+def test_openmeteo_sst_both_empty_returns_empty_frame():
+    with requests_mock.Mocker() as m:
+        m.get(om.MARINE_URL, status_code=503, text="down")
+        m.get(om.ARCHIVE_URL, status_code=503, text="down")
+        df = om.fetch_openmeteo_sst_point(0.0, 0.0, "2025-09-09", "2025-09-09")
+    assert df.empty

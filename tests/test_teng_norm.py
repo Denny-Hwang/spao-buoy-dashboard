@@ -39,6 +39,28 @@ def test_teng_power_all_nan_when_missing():
     assert p.isna().all()
 
 
+def test_teng_power_fy25_battery_current_fallback():
+    # FY25 / FY26: Battery [V] × TENG Current Avg [mA] → P [mW].
+    df = _frame(**{
+        "Battery": [3.3, 3.4, 3.5],
+        "TENG Current Avg": [2.0, 4.0, 10.0],
+    })
+    p = teng_power_mw(df)
+    assert p.iloc[0] == pytest.approx(6.6)
+    assert p.iloc[1] == pytest.approx(13.6)
+    assert p.iloc[2] == pytest.approx(35.0)
+
+
+def test_teng_power_direct_column_takes_priority_over_battery():
+    df = _frame(**{
+        "TENG_P_mW": [1.0, 2.0],
+        "Battery": [3.3, 3.3],
+        "TENG Current Avg": [100.0, 100.0],
+    })
+    p = teng_power_mw(df)
+    assert list(p) == [1.0, 2.0]
+
+
 def test_eta_levels_monotonic_in_wave_state():
     # Constant TENG output; increasing Hs → eta1 and eta2 should shrink.
     df = _frame(

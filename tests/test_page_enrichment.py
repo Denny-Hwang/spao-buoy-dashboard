@@ -37,8 +37,8 @@ def _stubs():
     yield
 
 
-def test_page10_importable_under_stub():
-    page = PAGES_DIR / "10_📡_Data_Enrichment.py"
+def test_page_enrichment_importable_under_stub():
+    page = PAGES_DIR / "11_📡_Data_Enrichment.py"
     assert page.exists()
     _load_module(page, "_page_10_enrichment")
 

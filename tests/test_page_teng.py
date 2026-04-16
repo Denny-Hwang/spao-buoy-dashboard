@@ -83,8 +83,8 @@ def test_teng_panels_build_figures():
     assert fig_v is not None
 
 
-def test_page7_importable_under_stub():
-    page = PAGES_DIR / "7_🔋_TENG_Performance.py"
+def test_page_teng_importable_under_stub():
+    page = PAGES_DIR / "8_🔋_TENG_Performance.py"
     assert page.exists()
     # The page calls sheets_client.get_all_data() — under the stub this
     # will raise and the page's try/except path handles it, then

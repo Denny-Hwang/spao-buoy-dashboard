@@ -133,10 +133,11 @@ are hidden behind the sidebar toggle **"Show Phase 2 enriched columns"**
 
 **Phase 2 pages (skeleton — full implementation lands in follow-up PRs):**
 
-- `7_🔋_TENG_Performance.py` — harvested energy vs. sea state
-- `8_🌊_SST_Validation.py` — buoy SST vs. OISST / MUR / OSTIA / ERA5
-- `9_🧭_Drift_Dynamics.py` — wind- and current-driven drift decomposition
-- `10_📡_Data_Enrichment.py` — enrichment coverage and status
+- `7_📖_Phase2_Overview.py` — reference page: data sources, cron pipeline, visualization legend
+- `8_🔋_TENG_Performance.py` — harvested energy vs. sea state
+- `9_🌊_SST_Validation.py` — buoy SST vs. OISST / MUR / OSTIA / ERA5 / Open-Meteo (coastal/inland)
+- `10_🧭_Drift_Dynamics.py` — wind- and current-driven drift decomposition
+- `11_📡_Data_Enrichment.py` — enrichment coverage and status
 
 **Enrichment pipeline.** GitHub Actions workflows run on a schedule and
 write enriched columns back into the same Google Sheet, so the Streamlit

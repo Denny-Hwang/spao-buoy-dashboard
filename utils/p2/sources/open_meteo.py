@@ -49,6 +49,13 @@ HISTORICAL_VARS = [
     "wind_direction_10m",
 ]
 
+# Extra archive variable used by the coastal / continental SST fetcher.
+# ``soil_temperature_0cm`` is the ERA5-Land skin temperature (0 cm depth)
+# in degrees Celsius; it is defined globally over land so it fills the
+# gap where satellite SST products (OISST/MUR/OSTIA) are masked near
+# shore or inland — e.g. the Richland WA river test deployment.
+HISTORICAL_SURFACE_TEMP_VAR = "soil_temperature_0cm"
+
 DEFAULT_TIMEOUT = 30
 RATE_LIMIT_SLEEP = 0.15
 MAX_RETRIES = 3
@@ -152,11 +159,80 @@ def fetch_historical_point(
     return _hourly_frame(payload or {}, HISTORICAL_VARS)
 
 
+def fetch_openmeteo_sst_point(
+    lat: float,
+    lon: float,
+    start_dt: date | datetime | pd.Timestamp,
+    end_dt: date | datetime | pd.Timestamp,
+) -> pd.DataFrame:
+    """Fetch an Open-Meteo-derived surface temperature for a point.
+
+    Returns a tz-aware UTC-indexed DataFrame with one column, ``sst_c``,
+    holding the best-available temperature (°C):
+
+    1. Open-Meteo **Marine** ``sea_surface_temperature`` (ERA5 SST over
+       the ocean). Preferred when present.
+    2. Open-Meteo **Archive** ``soil_temperature_0cm`` (ERA5-Land skin
+       temperature) when the marine value is NaN — this covers coastal
+       points and fully-continental deployments such as Richland WA.
+
+    The union of the two series guarantees at least one non-NaN value
+    almost everywhere on the globe, giving Page 8 SST validation a
+    reference product that does not disappear the moment the buoy
+    drifts onshore.
+    """
+    marine_params = {
+        "latitude": round(float(lat), 4),
+        "longitude": round(float(lon), 4),
+        "start_date": _fmt_date(start_dt),
+        "end_date": _fmt_date(end_dt),
+        "hourly": "sea_surface_temperature",
+        "timezone": "UTC",
+    }
+    archive_params = {
+        "latitude": round(float(lat), 4),
+        "longitude": round(float(lon), 4),
+        "start_date": _fmt_date(start_dt),
+        "end_date": _fmt_date(end_dt),
+        "hourly": HISTORICAL_SURFACE_TEMP_VAR,
+        "timezone": "UTC",
+    }
+
+    time.sleep(RATE_LIMIT_SLEEP)
+    marine = _http_get(MARINE_URL, marine_params) or {}
+    marine_df = _hourly_frame(marine, ["sea_surface_temperature"])
+
+    time.sleep(RATE_LIMIT_SLEEP)
+    archive = _http_get(ARCHIVE_URL, archive_params) or {}
+    archive_df = _hourly_frame(archive, [HISTORICAL_SURFACE_TEMP_VAR])
+
+    if marine_df.empty and archive_df.empty:
+        return pd.DataFrame(columns=["sst_c"])
+
+    # Align on the union of timestamps; prefer marine, fall back to land.
+    if marine_df.empty:
+        land = pd.to_numeric(archive_df[HISTORICAL_SURFACE_TEMP_VAR], errors="coerce")
+        return pd.DataFrame({"sst_c": land})
+
+    sea = pd.to_numeric(marine_df["sea_surface_temperature"], errors="coerce")
+    if archive_df.empty:
+        return pd.DataFrame({"sst_c": sea})
+
+    land = pd.to_numeric(archive_df[HISTORICAL_SURFACE_TEMP_VAR], errors="coerce")
+    combined_index = sea.index.union(land.index).sort_values()
+    sea = sea.reindex(combined_index)
+    land = land.reindex(combined_index)
+    merged = sea.where(sea.notna(), land)
+    return pd.DataFrame({"sst_c": merged})
+
+
 __all__ = [
     "MARINE_URL",
     "ARCHIVE_URL",
     "MARINE_VARS",
     "HISTORICAL_VARS",
+    "HISTORICAL_SURFACE_TEMP_VAR",
     "fetch_marine_point",
     "fetch_historical_point",
+    "fetch_openmeteo_sst_point",
 ]

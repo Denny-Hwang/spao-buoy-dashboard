@@ -101,7 +101,7 @@ def test_c3_storm_table_and_epoch():
     assert fig_box is not None
 
 
-def test_page9_importable_under_stub():
-    page = PAGES_DIR / "9_🧭_Drift_Dynamics.py"
+def test_page_drift_importable_under_stub():
+    page = PAGES_DIR / "10_🧭_Drift_Dynamics.py"
     assert page.exists()
     _load_module(page, "_page_9_drift")

@@ -234,29 +234,75 @@ _b_warning = (
 
 with tab_b1:
     st.subheader("B1 — Intercomparison")
+    st.markdown(
+        "Compare the buoy's **external SST** thermistor against every enriched "
+        "reference product (satellite and reanalysis) to catch biases, drift, "
+        "and coverage gaps. The buoy is treated as the point-truth; each "
+        "product is the candidate reference."
+    )
+
+    with st.expander("ℹ️  What does each SST product mean? (source · resolution · known bias)"):
+        for name, info in panels.PRODUCT_INFO.items():
+            st.markdown(
+                f"**{name}** — *{info['source']}*  \n"
+                f"&nbsp;&nbsp;&nbsp;• Access: {info['access']}  \n"
+                f"&nbsp;&nbsp;&nbsp;• Resolution: {info['resolution']}  \n"
+                f"&nbsp;&nbsp;&nbsp;• Known bias: {info['bias']}"
+            )
+
+    show_internal = st.checkbox(
+        "Overlay buoy internal temperature (hull thermistor)",
+        value=False,
+        key="p8_show_internal_temp",
+        help=(
+            "Internal temperature is NOT a water-SST measurement — it lives "
+            "inside the sealed hull. Toggle on to visualize thermal lag "
+            "between the water and the electronics bay."
+        ),
+    )
+
     if not per_row_ready:
         st.warning(_b_warning)
     else:
+        st.markdown(f"*{panels.DESCRIPTIONS['metrics_table']}*")
         metrics = panels.build_metrics_table(df)
         st.dataframe(metrics.style.format({
             "bias": "{:+.3f}", "rmse": "{:.3f}", "uRMSE": "{:.3f}",
             "std_diff": "{:+.3f}", "correlation": "{:.3f}",
         }), use_container_width=True)
 
+        st.markdown(f"*{panels.DESCRIPTIONS['pairwise_bias']}*")
+        st.plotly_chart(panels.build_pairwise_bias_bar(df), use_container_width=True)
+
         col_left, col_right = st.columns(2)
         with col_left:
+            st.markdown(f"*{panels.DESCRIPTIONS['taylor']}*")
             st.plotly_chart(panels.build_taylor(df), use_container_width=True)
         with col_right:
+            st.markdown(f"*{panels.DESCRIPTIONS['target']}*")
             st.plotly_chart(panels.build_target(df), use_container_width=True)
 
-        st.plotly_chart(panels.build_sst_timeseries(df), use_container_width=True)
+        st.markdown(f"*{panels.DESCRIPTIONS['timeseries']}*")
+        st.plotly_chart(
+            panels.build_sst_timeseries(df, include_internal_temp=show_internal),
+            use_container_width=True,
+        )
+
+        st.markdown(f"*{panels.DESCRIPTIONS['residual_hist']}*")
         st.plotly_chart(panels.build_residual_histogram(df), use_container_width=True)
 
 with tab_b2:
     st.subheader("B2 — Drift Detection")
+    st.markdown(
+        "Track the **buoy − reference** residual over time; a non-zero slope "
+        "here means the buoy thermistor is slowly drifting relative to a "
+        "(trusted) reference. OISST is the default reference because it "
+        "fuses in-situ + AVHRR data and has the longest continuous record."
+    )
     if not per_row_ready:
         st.warning(_b_warning)
     else:
+        st.markdown(f"*{panels.DESCRIPTIONS['drift_ts']}*")
         drift = panels.build_drift_timeseries(df)
         st.plotly_chart(drift["fig"], use_container_width=True)
 
@@ -267,11 +313,18 @@ with tab_b2:
         else:
             col2.success("🟢 No drift alarm")
 
+        st.markdown(f"*{panels.DESCRIPTIONS['drift_box']}*")
         st.plotly_chart(panels.build_drift_boxplot(df), use_container_width=True)
+        st.markdown(f"*{panels.DESCRIPTIONS['cusum']}*")
         st.plotly_chart(panels.build_cusum_chart(df), use_container_width=True)
 
 with tab_b3:
     st.subheader("B3 — Diurnal Warming")
+    st.markdown(
+        "Bulk satellite products resolve daily or foundation-SST; the buoy "
+        "samples often enough to see the diurnal cycle. Large daily amplitudes "
+        "at low wind indicate strong skin warming the references can't see."
+    )
     if not per_row_ready:
         st.warning(_b_warning)
     else:
@@ -281,11 +334,22 @@ with tab_b3:
             key="p8_clear_sky",
             help="If ERA5 cloud_cover is not in the enriched schema, the toggle has no effect.",
         )
+        b3_internal = st.checkbox(
+            "Overlay buoy internal temperature (hull thermistor)",
+            value=False,
+            key="p8_b3_internal_temp",
+            help="Compare water-SST diurnal cycle vs the electronics-bay thermal response.",
+        )
         df_view = df
         if clear_sky and "ERA5_CLOUD_COVER" in df.columns:
             df_view = df[df["ERA5_CLOUD_COVER"] < 30]
 
-        st.plotly_chart(panels.build_diurnal_composite(df_view), use_container_width=True)
+        st.markdown(f"*{panels.DESCRIPTIONS['diurnal']}*")
+        st.plotly_chart(
+            panels.build_diurnal_composite(df_view, include_internal_temp=b3_internal),
+            use_container_width=True,
+        )
+        st.markdown(f"*{panels.DESCRIPTIONS['amplitude_vs_wind']}*")
         st.plotly_chart(panels.build_amplitude_vs_wind(df_view), use_container_width=True)
         st.caption("Kawai & Wada (2007) overlay is a qualitative envelope.")
 
