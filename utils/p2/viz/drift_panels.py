@@ -193,11 +193,18 @@ def build_trajectory_speed_colored(
 
     lat_min, lat_max = float(np.nanmin(lat_v)), float(np.nanmax(lat_v))
     lon_min, lon_max = float(np.nanmin(lon_v)), float(np.nanmax(lon_v))
+    # If the track straddles the antimeridian (lon jumps −179 ↔ +179)
+    # the naive min/max spans ~360° instead of a few degrees. Detect by
+    # looking for an unphysically wide lon span + lat span and fall
+    # back to a global-ish view rather than the broken zoom.
+    crosses_antimeridian = (lon_max - lon_min) > 180.0
+    if crosses_antimeridian:
+        lon_min, lon_max = -180.0, 180.0
     # Ensure a minimum window so a stationary track still has visible extent.
     span_lat = max(lat_max - lat_min, 0.05)
     span_lon = max(lon_max - lon_min, 0.05)
     lat_pad = max(pad_deg, 0.2 * span_lat)
-    lon_pad = max(pad_deg, 0.2 * span_lon)
+    lon_pad = max(pad_deg, 0.2 * span_lon) if not crosses_antimeridian else 0.0
 
     fig.update_layout(
         title=dict(text="Trajectory — coloured by drift speed", font=dict(size=20)),
