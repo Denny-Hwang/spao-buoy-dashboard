@@ -39,6 +39,59 @@ POULAIN_ALPHA_LOW = 0.03      # undrogued lower
 POULAIN_ALPHA_HIGH = 0.05     # undrogued upper
 
 
+DESCRIPTIONS: dict[str, str] = {
+    "trajectory": (
+        "Drift trajectory coloured by instantaneous speed. Start / end are "
+        "marked with a green circle and red star; hover shows UTC time, "
+        "speed and wind. Use this to connect spatial patterns to the "
+        "time-series on the rest of the page."
+    ),
+    "stick_plot": (
+        "Meridional (north-south) drift velocity over time — vertical bars "
+        "help spot sign flips and event-driven reversals."
+    ),
+    "cumulative_distance": (
+        "Total distance travelled along the trajectory — a steeper slope "
+        "means a faster drift leg."
+    ),
+    "daily_displacement": (
+        "Per-day net displacement magnitude — short bars on quiet days, "
+        "tall bars under storms."
+    ),
+    "alpha": (
+        "Rolling windage coefficient α = |U_drift| / |U_wind|. Reference "
+        "lines compare the buoy to drogued (Niiler-Paduan 0.007) and "
+        "undrogued (Poulain 0.03–0.05) surface drifters."
+    ),
+    "theta": (
+        "Deflection angle (θ, CCW positive) between wind vector and drift "
+        "vector. Classical Ekman theory predicts ~45° to the right in the "
+        "northern hemisphere."
+    ),
+    "roses": (
+        "Wind and drift roses share the same polar binning so the user can "
+        "see at a glance how wind forcing aligns (or not) with buoy drift."
+    ),
+    "residual_vs_oscar": (
+        "After subtracting the wind-driven Ekman component, the remaining "
+        "residual drift should correlate with OSCAR surface currents if "
+        "the decomposition is right."
+    ),
+    "storm_table": (
+        "Storms auto-detected from Hs / U10 thresholds; peaks and duration "
+        "are the entry points into the superposed-epoch view below."
+    ),
+    "epoch_multipanel": (
+        "Storm-centred superposed-epoch composite ±48 h. A sharp peak at "
+        "lag = 0 means every storm acts the same way on this variable."
+    ),
+    "pre_during_post": (
+        "Distribution of the chosen variable before, during, and after each "
+        "storm — highlights sustained or delayed response."
+    ),
+}
+
+
 def _require_plotly() -> None:
     if go is None:  # pragma: no cover
         raise RuntimeError("plotly is required for utils.p2.viz.drift_panels")
@@ -47,8 +100,21 @@ def _require_plotly() -> None:
 # ──────────────────────────────────────────────────────────────────────
 # C1 — Trajectory
 # ──────────────────────────────────────────────────────────────────────
-def build_trajectory_speed_colored(df: pd.DataFrame) -> Any:
-    """Lat/Lon polyline coloured by instantaneous drift speed (m/s)."""
+def build_trajectory_speed_colored(
+    df: pd.DataFrame,
+    *,
+    height: int = 640,
+    pad_deg: float = 0.15,
+) -> Any:
+    """Lat/Lon polyline coloured by instantaneous drift speed (m/s).
+
+    Phase-2 oriented trajectory view: larger than the default geo chart,
+    auto-zoom to tightly fit the observed track (with a small padding
+    band so start / end markers stay fully visible), start-of-track and
+    latest-position markers for quick temporal anchoring, and hover
+    tooltips that join lat/lon/UTC/speed/wind in one line so operators
+    don't have to cross-reference the time-series.
+    """
     _require_plotly()
     drift = compute_drift_velocity(df)
     if "u_drift" not in drift.columns:
@@ -59,18 +125,99 @@ def build_trajectory_speed_colored(df: pd.DataFrame) -> Any:
     lon = pd.to_numeric(drift.get(lon_col), errors="coerce")
     speed = np.sqrt(drift["u_drift"] ** 2 + drift["v_drift"] ** 2)
     mask = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(speed)
+    lat_v = lat[mask].to_numpy()
+    lon_v = lon[mask].to_numpy()
+    spd_v = speed[mask].to_numpy()
+
+    ts = pd.to_datetime(drift.get("Timestamp"), utc=True, errors="coerce")
+    ts_v = ts[mask]
+    wind = None
+    if "U10" in drift.columns and "V10" in drift.columns:
+        u10 = pd.to_numeric(drift.get("U10"), errors="coerce")
+        v10 = pd.to_numeric(drift.get("V10"), errors="coerce")
+        wind = np.sqrt(u10 ** 2 + v10 ** 2)[mask].to_numpy()
+
     fig = go.Figure()
+
+    if lat_v.size == 0:
+        fig.update_layout(
+            title=dict(text="Trajectory — no drift data", font=dict(size=18)),
+            height=height,
+        )
+        return fig
+
+    hover = []
+    for i in range(len(lat_v)):
+        t = ts_v.iloc[i].strftime("%Y-%m-%d %H:%M UTC") if pd.notna(ts_v.iloc[i]) else "—"
+        w = f"{wind[i]:.1f} m/s" if wind is not None and np.isfinite(wind[i]) else "n/a"
+        hover.append(
+            f"{t}<br>lat {lat_v[i]:.4f}°, lon {lon_v[i]:.4f}°"
+            f"<br>speed {spd_v[i]:.3f} m/s<br>wind {w}"
+        )
+
     fig.add_trace(go.Scattergeo(
-        lon=lon[mask], lat=lat[mask], mode="lines+markers",
-        marker=dict(size=6, color=speed[mask], colorscale="Viridis",
-                    colorbar=dict(title="Speed (m/s)")),
-        line=dict(width=2, color="rgba(0,0,0,0.4)"),
+        lon=lon_v, lat=lat_v, mode="lines+markers",
+        marker=dict(
+            size=6, color=spd_v, colorscale="Viridis",
+            cmin=float(np.nanmin(spd_v)) if spd_v.size else 0.0,
+            cmax=float(np.nanpercentile(spd_v, 95)) if spd_v.size else 1.0,
+            colorbar=dict(
+                title=dict(text="Speed (m/s)", font=dict(size=13)),
+                thickness=16, len=0.75, x=1.02,
+                tickfont=dict(size=12),
+            ),
+        ),
+        line=dict(width=2, color="rgba(0,0,0,0.35)"),
         name="trajectory",
+        text=hover,
+        hoverinfo="text",
     ))
+
+    # Start marker (green circle) and latest marker (red star).
+    fig.add_trace(go.Scattergeo(
+        lon=[lon_v[0]], lat=[lat_v[0]], mode="markers+text",
+        marker=dict(size=14, color="#2E7D32", symbol="circle",
+                    line=dict(width=2, color="white")),
+        text=["Start"], textposition="top center",
+        textfont=dict(color="#2E7D32", size=12),
+        name="Start", hoverinfo="text",
+    ))
+    fig.add_trace(go.Scattergeo(
+        lon=[lon_v[-1]], lat=[lat_v[-1]], mode="markers+text",
+        marker=dict(size=16, color="#C62828", symbol="star",
+                    line=dict(width=2, color="white")),
+        text=["Latest"], textposition="top center",
+        textfont=dict(color="#C62828", size=12),
+        name="Latest", hoverinfo="text",
+    ))
+
+    lat_min, lat_max = float(np.nanmin(lat_v)), float(np.nanmax(lat_v))
+    lon_min, lon_max = float(np.nanmin(lon_v)), float(np.nanmax(lon_v))
+    # Ensure a minimum window so a stationary track still has visible extent.
+    span_lat = max(lat_max - lat_min, 0.05)
+    span_lon = max(lon_max - lon_min, 0.05)
+    lat_pad = max(pad_deg, 0.2 * span_lat)
+    lon_pad = max(pad_deg, 0.2 * span_lon)
+
     fig.update_layout(
-        title="Trajectory (speed-coloured)",
-        geo=dict(projection_type="natural earth", showland=True, showocean=True,
-                 landcolor="lightgrey", oceancolor="lightblue"),
+        title=dict(text="Trajectory — coloured by drift speed", font=dict(size=20)),
+        height=height,
+        margin=dict(l=10, r=10, t=60, b=10),
+        legend=dict(font=dict(size=12), x=0.01, y=0.99,
+                    bgcolor="rgba(255,255,255,0.8)"),
+        geo=dict(
+            projection_type="mercator",
+            showland=True, landcolor="#eaeaea",
+            showocean=True, oceancolor="#cfe3ef",
+            showcoastlines=True, coastlinecolor="#5A5A5A",
+            showcountries=True, countrycolor="#aaaaaa",
+            showrivers=True, rivercolor="#a8cfe0",
+            showlakes=True, lakecolor="#cfe3ef",
+            lataxis=dict(range=[lat_min - lat_pad, lat_max + lat_pad],
+                         showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+            lonaxis=dict(range=[lon_min - lon_pad, lon_max + lon_pad],
+                         showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        ),
     )
     return fig
 
@@ -97,9 +244,14 @@ def build_stick_plot_drift(df: pd.DataFrame) -> Any:
     fig.add_trace(go.Scatter(x=ts, y=u, mode="lines", name="u_drift",
                              line=dict(color="darkorange", width=1)))
     fig.update_layout(
-        title="Drift velocity stick plot",
-        xaxis_title="Time",
-        yaxis_title="Meridional velocity (m/s)",
+        title=dict(text="Drift velocity stick plot", font=dict(size=18)),
+        xaxis=dict(title=dict(text="Time", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="Meridional velocity (m/s)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=420,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=60, r=30, t=55, b=50),
         shapes=shapes,
     )
     return fig
@@ -114,9 +266,20 @@ def build_cumulative_distance(df: pd.DataFrame) -> Any:
     dt = ts.diff().dt.total_seconds()
     step = np.where(np.isfinite(speed) & np.isfinite(dt), speed * dt, 0.0)
     cum_km = np.cumsum(step) / 1000.0
-    fig = go.Figure(go.Scatter(x=ts, y=cum_km, mode="lines", name="cumulative"))
-    fig.update_layout(title="Cumulative distance",
-                      xaxis_title="Time", yaxis_title="Distance (km)")
+    fig = go.Figure(go.Scatter(
+        x=ts, y=cum_km, mode="lines", name="cumulative",
+        line=dict(width=2.5, color="#003E6B"),
+    ))
+    fig.update_layout(
+        title=dict(text="Cumulative distance", font=dict(size=17)),
+        xaxis=dict(title=dict(text="Time", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="Distance (km)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=380,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=25, t=55, b=45),
+    )
     return fig
 
 
@@ -137,9 +300,20 @@ def build_daily_displacement(df: pd.DataFrame) -> Any:
         lambda g: np.sqrt(g["dx"].sum() ** 2 + g["dy"].sum() ** 2) / 1000.0,
         include_groups=False,
     )
-    fig = go.Figure(go.Bar(x=list(daily.index), y=daily.values, name="displacement"))
-    fig.update_layout(title="Daily displacement",
-                      xaxis_title="Date", yaxis_title="Distance (km)")
+    fig = go.Figure(go.Bar(
+        x=list(daily.index), y=daily.values, name="displacement",
+        marker=dict(color="#F0AB00"),
+    ))
+    fig.update_layout(
+        title=dict(text="Daily displacement", font=dict(size=17)),
+        xaxis=dict(title=dict(text="Date", font=dict(size=14)),
+                   tickfont=dict(size=12)),
+        yaxis=dict(title=dict(text="Distance (km)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=380,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=25, t=55, b=45),
+    )
     return fig
 
 
@@ -186,8 +360,14 @@ def build_alpha_timeseries(df: pd.DataFrame) -> Any:
                   fillcolor="orange", opacity=0.1,
                   annotation_text="Poulain 0.03–0.05 (undrogued)")
     fig.update_layout(
-        title="Rolling windage coefficient α(t)",
-        xaxis_title="Time", yaxis_title="α (unitless)",
+        title=dict(text="Rolling windage coefficient α(t)", font=dict(size=18)),
+        xaxis=dict(title=dict(text="Time", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="α (unitless)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=420,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=30, t=55, b=50),
     )
     return fig
 
@@ -202,9 +382,14 @@ def build_theta_histogram(df: pd.DataFrame) -> Any:
     fig.add_vline(x=45, line_dash="dash", line_color="red",
                   annotation_text="Ekman 45° (NH)")
     fig.update_layout(
-        title="Deflection angle histogram",
-        xaxis_title="θ (degrees, CCW positive)",
-        yaxis_title="count",
+        title=dict(text="Deflection angle histogram", font=dict(size=18)),
+        xaxis=dict(title=dict(text="θ (degrees, CCW positive)", font=dict(size=14)),
+                   tickfont=dict(size=12)),
+        yaxis=dict(title=dict(text="count", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=380,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=30, t=55, b=50),
     )
     return fig
 
@@ -221,8 +406,15 @@ def _rose_figure(directions, speeds, title: str) -> Any:
     thetas = 0.5 * (edges[:-1] + edges[1:])
     fig = go.Figure(go.Barpolar(r=hist, theta=thetas, width=[360.0 / bins] * bins,
                                 marker=dict(color=hist, colorscale="Viridis")))
-    fig.update_layout(title=title,
-                      polar=dict(angularaxis=dict(direction="clockwise", rotation=90)))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=17)),
+        polar=dict(
+            angularaxis=dict(direction="clockwise", rotation=90,
+                             tickfont=dict(size=11)),
+            radialaxis=dict(tickfont=dict(size=11)),
+        ),
+        height=420, margin=dict(l=30, r=30, t=60, b=30),
+    )
     return fig
 
 
@@ -271,9 +463,14 @@ def build_residual_vs_oscar(df: pd.DataFrame) -> Any:
         marker=dict(size=6, opacity=0.6, color="crimson"),
     ))
     fig.update_layout(
-        title="Residual drift vs OSCAR surface currents",
-        xaxis_title="Residual component (m/s)",
-        yaxis_title="OSCAR component (m/s)",
+        title=dict(text="Residual drift vs OSCAR surface currents", font=dict(size=18)),
+        xaxis=dict(title=dict(text="Residual component (m/s)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        yaxis=dict(title=dict(text="OSCAR component (m/s)", font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        height=440,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=30, t=55, b=50),
     )
     return fig
 
@@ -342,10 +539,20 @@ def build_epoch_multipanel(df: pd.DataFrame, variables: list[str] | None = None)
                                  line=dict(color="blue", width=2), name=var),
                       row=row, col=1)
         fig.add_vline(x=0, line_color="red", line_dash="dash", row=row, col=1)
-    fig.update_layout(title="Storm superposed epoch ±48 h",
-                      height=220 * len(variables),
-                      showlegend=False)
-    fig.update_xaxes(title_text="Lag (hours)", row=len(variables), col=1)
+    fig.update_layout(
+        title=dict(text="Storm superposed epoch ±48 h", font=dict(size=18)),
+        height=max(280, 240 * len(variables)),
+        showlegend=False,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=60, r=30, t=60, b=50),
+        font=dict(size=12),
+    )
+    fig.update_xaxes(
+        title_text="Lag (hours)", row=len(variables), col=1,
+        title_font=dict(size=14), tickfont=dict(size=12),
+        showgrid=True, gridcolor="#e5e7eb",
+    )
+    fig.update_yaxes(tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb")
     return fig
 
 
@@ -371,8 +578,15 @@ def build_pre_during_post_box(df: pd.DataFrame, var: str = "Hs") -> Any:
         if sub.empty:
             continue
         fig.add_trace(go.Box(y=pd.to_numeric(sub[var], errors="coerce"), name=phase))
-    fig.update_layout(title=f"Pre / during / post storm {var}",
-                      yaxis_title=var)
+    fig.update_layout(
+        title=dict(text=f"Pre / during / post storm {var}", font=dict(size=17)),
+        yaxis=dict(title=dict(text=var, font=dict(size=14)),
+                   tickfont=dict(size=12), showgrid=True, gridcolor="#e5e7eb"),
+        xaxis=dict(tickfont=dict(size=12)),
+        height=400,
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=55, r=25, t=55, b=45),
+    )
     return fig
 
 
@@ -380,6 +594,7 @@ __all__ = [
     "NIILER_PADUAN_ALPHA",
     "POULAIN_ALPHA_LOW",
     "POULAIN_ALPHA_HIGH",
+    "DESCRIPTIONS",
     "build_trajectory_speed_colored",
     "build_stick_plot_drift",
     "build_cumulative_distance",

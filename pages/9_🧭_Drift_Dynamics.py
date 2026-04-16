@@ -98,25 +98,42 @@ tab_c1, tab_c2, tab_c3 = st.tabs([
 # C1 — Trajectory ──────────────────────────────────────────────────────
 with tab_c1:
     st.subheader("C1 — Trajectory")
+    st.markdown(
+        "Where did the buoy go, how fast, and where is it now? The trajectory "
+        "view auto-zooms to the track and links directly to the time-series "
+        "panels below — spatial and temporal views should be read together."
+    )
+    st.markdown(f"*{panels.DESCRIPTIONS['trajectory']}*")
     st.plotly_chart(panels.build_trajectory_speed_colored(df), use_container_width=True)
+    st.markdown(f"*{panels.DESCRIPTIONS['stick_plot']}*")
     st.plotly_chart(panels.build_stick_plot_drift(df), use_container_width=True)
     col1, col2 = st.columns(2)
     with col1:
+        st.markdown(f"*{panels.DESCRIPTIONS['cumulative_distance']}*")
         st.plotly_chart(panels.build_cumulative_distance(df), use_container_width=True)
     with col2:
+        st.markdown(f"*{panels.DESCRIPTIONS['daily_displacement']}*")
         st.plotly_chart(panels.build_daily_displacement(df), use_container_width=True)
 
 # C2 — Ekman decomposition ────────────────────────────────────────────
 with tab_c2:
     st.subheader("C2 — Ekman decomposition")
+    st.markdown(
+        "Decompose the drift velocity into a wind-driven component (Ekman) "
+        "and a residual. The residual should match surface currents from "
+        "OSCAR if the decomposition is clean."
+    )
+    st.markdown(f"*{panels.DESCRIPTIONS['alpha']}*")
     st.plotly_chart(panels.build_alpha_timeseries(df), use_container_width=True)
     st.caption(
         f"Reference lines: Niiler-Paduan α = {panels.NIILER_PADUAN_ALPHA} "
         f"(drogued); Poulain α ∈ [{panels.POULAIN_ALPHA_LOW}, "
         f"{panels.POULAIN_ALPHA_HIGH}] (undrogued band)."
     )
+    st.markdown(f"*{panels.DESCRIPTIONS['theta']}*")
     st.plotly_chart(panels.build_theta_histogram(df), use_container_width=True)
 
+    st.markdown(f"*{panels.DESCRIPTIONS['roses']}*")
     col1, col2 = st.columns(2)
     wind_rose, drift_rose = panels.build_wind_and_drift_rose(df)
     with col1:
@@ -124,17 +141,26 @@ with tab_c2:
     with col2:
         st.plotly_chart(drift_rose, use_container_width=True)
 
+    st.markdown(f"*{panels.DESCRIPTIONS['residual_vs_oscar']}*")
     st.plotly_chart(panels.build_residual_vs_oscar(df), use_container_width=True)
 
 # C3 — Storm Response ─────────────────────────────────────────────────
 with tab_c3:
     st.subheader("C3 — Storm Response")
+    st.markdown(
+        "Storm events are auto-detected from wave height (Hs) and wind "
+        "(U10) thresholds. Each event is used to compute a superposed-epoch "
+        "composite so response patterns emerge even from a modest catalog."
+    )
+    st.markdown(f"*{panels.DESCRIPTIONS['storm_table']}*")
     table = panels.build_storm_event_table(df)
     if table.empty:
         st.info("No storm events detected under the current thresholds.")
     else:
         st.dataframe(table, use_container_width=True)
+    st.markdown(f"*{panels.DESCRIPTIONS['epoch_multipanel']}*")
     st.plotly_chart(panels.build_epoch_multipanel(df), use_container_width=True)
+    st.markdown(f"*{panels.DESCRIPTIONS['pre_during_post']}*")
     st.plotly_chart(panels.build_pre_during_post_box(df, var="Hs"), use_container_width=True)
 
 render_footer()
