@@ -1,0 +1,52 @@
+name: Migrate FY25 Sheet (decode + rewrite)
+
+# This workflow is manual-only on purpose. FY25 is historical data and
+# the rewrite is a one-shot operation — we never want an accidental
+# schedule to re-run it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tab:
+        description: "Single tab name (e.g. FY25_Bearing_sea_RB_220835). Leave blank to migrate all FY25_* tabs."
+        required: false
+        default: ''
+      dry_run:
+        description: "Dry run (true = no writes, just preview + stats)."
+        required: true
+        default: 'true'
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements-cron.txt
+      - name: Run FY25 migration
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          TAB_FLAG="--all-fy25"
+          if [ -n "${{ github.event.inputs.tab }}" ]; then
+            TAB_FLAG="--tab ${{ github.event.inputs.tab }}"
+          fi
+          python scripts/migrate_fy25_decode.py $TAB_FLAG $DRY_FLAG \
+            | tee migrate_fy25.log
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrate-fy25-log
+          path: migrate_fy25.log
+          if-no-files-found: ignore
