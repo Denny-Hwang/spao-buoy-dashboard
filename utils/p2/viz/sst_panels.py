@@ -37,6 +37,105 @@ PRODUCT_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 BUOY_SST_ALIASES = ("SST_buoy", "sst_buoy", "SST", "Water Temp", "Water_Temp", "WaterTemp")
+BUOY_INTERNAL_TEMP_ALIASES = (
+    "Internal Temp", "Internal_Temp", "InternalTemp",
+    "Int Temp", "Int_Temp", "internal_temp",
+)
+
+
+# One-line descriptions used by the Streamlit page to explain each plot
+# directly under its title.
+DESCRIPTIONS: dict[str, str] = {
+    "timeseries": (
+        "Buoy SST (dots) overlaid on each satellite / reanalysis SST product "
+        "(solid lines). Looks for cold / warm biases and missing coverage."
+    ),
+    "residual_hist": (
+        "Distribution of buoy − reference SST differences with a Gaussian fit — "
+        "a symmetric zero-centred histogram means no systematic bias."
+    ),
+    "taylor": (
+        "Taylor diagram — each product's radial position is its std-dev ratio "
+        "and its angle is the correlation with the buoy, so the product "
+        "closest to the reference point agrees best with the buoy."
+    ),
+    "target": (
+        "Target diagram — normalized bias (y) vs unbiased RMSE (x). Products "
+        "inside the unit circle agree with the buoy to within one std-dev."
+    ),
+    "metrics_table": (
+        "Scalar validation metrics per product: number of paired samples, "
+        "bias, RMSE, unbiased RMSE, Δstd, correlation."
+    ),
+    "pairwise_bias": (
+        "Mean (buoy − product) bias per SST product — a quick side-by-side "
+        "ranking of how each reference compares to the buoy sensor."
+    ),
+    "drift_ts": (
+        "Residual (buoy − reference) over time with Theil-Sen trend line — "
+        "used to catch slow sensor drift (|slope| > 0.01 °C/week triggers an "
+        "alarm)."
+    ),
+    "drift_box": (
+        "Weekly residual boxplots — visual check for stable median and "
+        "tightening IQR over the deployment."
+    ),
+    "cusum": (
+        "Cumulative sum (CUSUM) of residuals — vertical lines flag the "
+        "samples at which CUSUM exceeds the alarm threshold, i.e. a change "
+        "point in the bias."
+    ),
+    "diurnal": (
+        "Hour-of-day mean buoy SST vs the reference's daily mean — highlights "
+        "diurnal warming cycles that bulk satellite SST cannot resolve."
+    ),
+    "amplitude_vs_wind": (
+        "Daily diurnal-amplitude (max − min) vs daily-mean wind speed, "
+        "overlaid with Kawai & Wada (2007) empirical envelope A = 2.5·U⁻¹."
+    ),
+}
+
+
+# Descriptions of each reference product — surfaced in an expander on
+# page 8 so scientists know exactly what they're comparing against.
+PRODUCT_INFO: dict[str, dict[str, str]] = {
+    "Buoy": {
+        "source":  "Buoy external SST sensor (thermistor at hull)",
+        "access":  "Decoded from RockBLOCK satellite telemetry, 1 sample ~ 30 min",
+        "resolution": "Point measurement (the buoy itself)",
+        "bias":    "Skin-effect warm bias possible in low-wind sun; no bulk SST correction applied",
+    },
+    "OISST": {
+        "source":  "NOAA Optimum Interpolation SST v2.1 (AVHRR + in-situ blended)",
+        "access":  "ERDDAP griddap `ncdcOisst21Agg_LonPM180`, daily",
+        "resolution": "0.25° (~25 km) daily mean, global",
+        "bias":    "Bulk SST; under-estimates skin during diurnal peak. Masked on land.",
+    },
+    "MUR": {
+        "source":  "JPL MUR (Multi-scale Ultra-high Resolution) L4 GHRSST",
+        "access":  "ERDDAP griddap `jplMURSST41`, daily",
+        "resolution": "0.01° (~1 km) daily foundation SST, global",
+        "bias":    "Foundation SST (diurnal cycle removed by construction). Masked on land.",
+    },
+    "OSTIA": {
+        "source":  "UKMO OSTIA Global Ocean SST Analysis (Copernicus CMEMS)",
+        "access":  "Copernicus Marine SDK `copernicusmarine` subset, daily",
+        "resolution": "0.05° (~5 km) daily foundation SST, global",
+        "bias":    "Foundation SST; 24-h lag. Masked on land.",
+    },
+    "ERA5": {
+        "source":  "ECMWF ERA5 reanalysis surface SST (via Open-Meteo Marine)",
+        "access":  "Open-Meteo Marine API `sea_surface_temperature`, hourly",
+        "resolution": "~0.25° reanalysis, hourly, global over ocean",
+        "bias":    "Model-assimilated; reacts to wind but not instantaneous microscale events.",
+    },
+    "OpenMeteo": {
+        "source":  "Open-Meteo unified surface temperature (Marine + ERA5-Land)",
+        "access":  "Marine `sea_surface_temperature` with ERA5-Land `soil_temperature_0cm` fallback",
+        "resolution": "~0.1° hourly — works over ocean AND land (coastal/inland deployments)",
+        "bias":    "Over land this is soil skin temperature, NOT water SST — use with care near shore.",
+    },
+}
 
 
 def _require_plotly() -> None:
@@ -70,6 +169,14 @@ def extract_products(df: pd.DataFrame) -> dict[str, pd.Series]:
 
 def extract_buoy_sst(df: pd.DataFrame) -> pd.Series | None:
     col = _column_or_none(df, BUOY_SST_ALIASES)
+    if col is None:
+        return None
+    return pd.to_numeric(df[col], errors="coerce")
+
+
+def extract_buoy_internal_temp(df: pd.DataFrame) -> pd.Series | None:
+    """Return the buoy internal temperature series (°C) when present."""
+    col = _column_or_none(df, BUOY_INTERNAL_TEMP_ALIASES)
     if col is None:
         return None
     return pd.to_numeric(df[col], errors="coerce")
@@ -122,6 +229,8 @@ def _resolve_dev_col(df: pd.DataFrame) -> str | None:
 def build_sst_timeseries(
     df: pd.DataFrame,
     ts_col: str | None = None,
+    *,
+    include_internal_temp: bool = False,
 ) -> Any:
     """Buoy SST (per device) vs satellite/reanalysis products over time.
 
@@ -191,6 +300,18 @@ def build_sst_timeseries(
             line=dict(width=2, color=color),
         ))
 
+    # Optional overlay: buoy internal temperature (inside the hull, NOT
+    # water SST). Useful to investigate thermal coupling / drift.
+    if include_internal_temp:
+        itemp = extract_buoy_internal_temp(df)
+        if itemp is not None and itemp.notna().any():
+            fig.add_trace(go.Scatter(
+                x=ts, y=itemp, mode="lines",
+                name="Buoy internal temp (hull)",
+                line=dict(width=1.5, color="#888888", dash="dot"),
+                opacity=0.85,
+            ))
+
     if apply_plot_style is not None:
         apply_plot_style(
             fig,
@@ -256,6 +377,47 @@ def build_target(df: pd.DataFrame) -> Any:
             raise RuntimeError("plotly required")
         return go.Figure().update_layout(title="Target diagram — data missing")
     return target_diagram(buoy, prods, title="SST target diagram")
+
+
+def build_pairwise_bias_bar(df: pd.DataFrame) -> Any:
+    """Bar chart of mean (buoy - product) per SST product — a one-look
+    ranking of which reference disagrees least with the buoy.
+    """
+    _require_plotly()
+    buoy = extract_buoy_sst(df)
+    prods = extract_products(df)
+    if buoy is None or not prods:
+        return go.Figure().update_layout(title="Pairwise bias — data missing")
+    names: list[str] = []
+    biases: list[float] = []
+    ns: list[int] = []
+    for name, series in prods.items():
+        if not series.notna().any():
+            continue
+        diff = (buoy - series).dropna()
+        if diff.empty:
+            continue
+        names.append(name)
+        biases.append(float(diff.mean()))
+        ns.append(int(len(diff)))
+    if not names:
+        return go.Figure().update_layout(title="Pairwise bias — no overlap")
+    colors = [_PRODUCT_COLORS.get(n, "#5A5A5A") for n in names]
+    fig = go.Figure(go.Bar(
+        x=names, y=biases, marker=dict(color=colors),
+        text=[f"{b:+.2f} °C<br>N={n}" for b, n in zip(biases, ns)],
+        textposition="outside",
+        hovertemplate="<b>%{x}</b><br>Bias = %{y:+.3f} °C<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_color="black", line_width=1)
+    fig.update_layout(
+        title=dict(text="Mean bias: buoy − product", font=dict(size=18)),
+        yaxis_title="Bias (°C)",
+        height=420,
+        margin=dict(l=60, r=30, t=60, b=50),
+        plot_bgcolor="white", paper_bgcolor="white",
+    )
+    return fig
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -355,7 +517,13 @@ def build_cusum_chart(df: pd.DataFrame, ref: str = "OISST") -> Any:
 # ──────────────────────────────────────────────────────────────────────
 # B3 — Diurnal warming
 # ──────────────────────────────────────────────────────────────────────
-def build_diurnal_composite(df: pd.DataFrame, ts_col: str = "Timestamp", ref: str = "OISST") -> Any:
+def build_diurnal_composite(
+    df: pd.DataFrame,
+    ts_col: str = "Timestamp",
+    ref: str = "OISST",
+    *,
+    include_internal_temp: bool = False,
+) -> Any:
     _require_plotly()
     buoy = extract_buoy_sst(df)
     prods = extract_products(df)
@@ -365,6 +533,10 @@ def build_diurnal_composite(df: pd.DataFrame, ts_col: str = "Timestamp", ref: st
     frame = pd.DataFrame({"ts": ts, "buoy": buoy}).dropna()
     if ref in prods:
         frame["ref"] = prods[ref].reindex(frame.index)
+    if include_internal_temp:
+        itemp = extract_buoy_internal_temp(df)
+        if itemp is not None:
+            frame["itemp"] = itemp.reindex(frame.index)
     if frame.empty:
         return go.Figure().update_layout(title="Diurnal composite — no data")
     frame["hour"] = frame["ts"].dt.hour
@@ -373,17 +545,31 @@ def build_diurnal_composite(df: pd.DataFrame, ts_col: str = "Timestamp", ref: st
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=buoy_mean.index, y=buoy_mean.values, mode="lines+markers",
-        name="buoy (hour-of-day mean)",
+        name="buoy SST (hour-of-day mean)",
+        line=dict(color="#003E6B", width=2),
+        marker=dict(size=8),
     ))
+    if "itemp" in frame.columns:
+        itemp_mean = frame.groupby("hour")["itemp"].mean()
+        if itemp_mean.notna().any():
+            fig.add_trace(go.Scatter(
+                x=itemp_mean.index, y=itemp_mean.values,
+                mode="lines+markers",
+                name="buoy internal temp (hour-of-day mean)",
+                line=dict(color="#888888", width=2, dash="dot"),
+                marker=dict(size=6),
+            ))
     if "ref" in frame.columns:
         ref_mean = frame["ref"].mean()
         if np.isfinite(ref_mean):
             fig.add_hline(y=ref_mean, line_dash="dash", line_color="grey",
                           annotation_text=f"{ref} daily mean")
     fig.update_layout(
-        title="Diurnal warming composite",
+        title=dict(text="Diurnal warming composite", font=dict(size=18)),
         xaxis_title="Hour of day (UTC)",
-        yaxis_title="SST (°C)",
+        yaxis_title="Temperature (°C)",
+        height=460,
+        plot_bgcolor="white", paper_bgcolor="white",
     )
     return fig
 
@@ -443,13 +629,18 @@ def build_amplitude_vs_wind(df: pd.DataFrame, ts_col: str = "Timestamp") -> Any:
 __all__ = [
     "PRODUCT_ALIASES",
     "BUOY_SST_ALIASES",
+    "BUOY_INTERNAL_TEMP_ALIASES",
+    "DESCRIPTIONS",
+    "PRODUCT_INFO",
     "extract_products",
     "extract_buoy_sst",
+    "extract_buoy_internal_temp",
     "build_metrics_table",
     "build_sst_timeseries",
     "build_residual_histogram",
     "build_taylor",
     "build_target",
+    "build_pairwise_bias_bar",
     "build_drift_timeseries",
     "build_drift_boxplot",
     "build_cusum_chart",
