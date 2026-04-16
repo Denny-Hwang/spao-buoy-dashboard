@@ -111,20 +111,24 @@ with tab_a1:
         "vs theoretical flux",
     ])
     with sub_hm:
+        st.markdown(f"*{panels.DESCRIPTIONS['hs_tp_heatmap']}*")
         st.plotly_chart(panels.build_hs_tp_heatmap(df), use_container_width=True)
         st.caption(
             f"Reference markers: Jung 2024 ({panels.JUNG_2024['P_mW']} mW, "
             f"blue star) and Lu 2026 ({panels.LU_2026['P_mW']} mW, red star)."
         )
     with sub_loglog:
+        st.markdown(f"*{panels.DESCRIPTIONS['loglog_hs2tp']}*")
         st.plotly_chart(panels.build_loglog_hs2tp(df), use_container_width=True)
         st.caption("Slope of ~1 indicates P_TENG scales linearly with Hs²·Tp.")
     with sub_flux:
+        st.markdown(f"*{panels.DESCRIPTIONS['flux_scatter']}*")
         st.plotly_chart(panels.build_flux_scatter(df), use_container_width=True)
         st.caption("Theoretical flux from Falnes (2002) Eq. 6.19 with Te = 0.9·Tp.")
 
 with tab_a4:
     st.subheader("A4 — Normalized Power Trend")
+    st.markdown(f"*{panels.DESCRIPTIONS['eta_trend']}*")
     level = st.radio(
         "Normalization level",
         options=[0, 1, 2],
@@ -149,6 +153,7 @@ with tab_a4:
             help=f"p = {trend['mk_p']:.3g} (N = {trend['n']})",
         )
 
+    st.markdown(f"*{panels.DESCRIPTIONS['week_violin']}*")
     st.plotly_chart(
         panels.build_week_violin(df, level=int(level)),
         use_container_width=True,
