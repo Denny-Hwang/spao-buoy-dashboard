@@ -325,3 +325,57 @@ def test_overlay_air_temp_adds_era5_trace_to_sst_group() -> None:
     fig = _fig_for_group_key(results, "Sea surface temperature")
     assert fig is not None
     assert any("Land / air temp" in str(t.name) for t in fig.data)
+
+
+def test_overlay_internal_temp_adds_hull_trace_to_sst_group() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        overlay_internal_temp=True,
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert any("internal" in str(t.name).lower() for t in fig.data)
+
+
+def test_overlay_internal_temp_default_off() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert not any("internal" in str(t.name).lower() for t in fig.data)
+
+
+# ---------- Enrichment coverage summary -----------------------------
+
+def test_summarize_enrichment_coverage_reports_ranges_and_cells() -> None:
+    df = _make_frame()
+    df["Lat"] = 46.28
+    df["Lon"] = -119.30
+    cov = sensor_overview.summarize_enrichment_coverage(df, "Timestamp")
+    assert cov["n_rows"] == len(df)
+    assert cov["lat_min"] == pytest.approx(46.28)
+    assert cov["lon_min"] == pytest.approx(-119.30)
+    # Snapped to the 0.1° enrichment grid — single cell for constant lat/lon.
+    assert cov["lat_cells"] == [46.3]
+    assert cov["lon_cells"] == [-119.3]
+    assert cov["n_hours_used"] > 0
+    assert cov["t_min"] is not None and cov["t_max"] is not None
+
+
+def test_summarize_enrichment_coverage_detects_inland_hint() -> None:
+    df = _make_frame()
+    # Inland signature: satellite products all NaN, Open-Meteo populated.
+    for c in ("SAT_SST_OISST_cC", "SAT_SST_MUR_cC", "SAT_SST_OSTIA_cC"):
+        df[c] = pd.NA
+    df["SAT_SST_OPENMETEO_cC"] = 1100
+    cov = sensor_overview.summarize_enrichment_coverage(df, "Timestamp")
+    assert cov["inland_hint"] is True
+
+
+def test_summarize_enrichment_coverage_empty_frame() -> None:
+    cov = sensor_overview.summarize_enrichment_coverage(pd.DataFrame(), "Timestamp")
+    assert cov["n_rows"] == 0
+    assert cov["t_min"] is None and cov["lat_min"] is None

@@ -235,6 +235,62 @@ with tab_overview:
             unsafe_allow_html=True,
         )
 
+        # GPS + time sanity-check panel — mirrors exactly what the cron
+        # enrichment pipeline snaps to (0.1° grid, hour buckets in UTC)
+        # so operators can verify the reference products are being
+        # fetched at the same place and time as the buoy.
+        _cov_fn = getattr(sensor_overview, "summarize_enrichment_coverage", None)
+        _inland = False
+        if _cov_fn is not None:
+            _cov = _cov_fn(df, time_col)
+            _inland = bool(_cov.get("inland_hint"))
+            with st.expander(
+                "🛰️  GPS & time alignment used for Phase 2 enrichment",
+                expanded=False,
+            ):
+                c_a, c_b, c_c = st.columns(3)
+                if _cov.get("lat_min") is not None:
+                    c_a.metric(
+                        "Latitude (°)",
+                        f"{_cov['lat_min']:.4f} → {_cov['lat_max']:.4f}",
+                        help=(
+                            f"Snapped to 0.1° cells "
+                            f"{_cov['lat_cells']}"
+                        ),
+                    )
+                if _cov.get("lon_min") is not None:
+                    c_b.metric(
+                        "Longitude (°)",
+                        f"{_cov['lon_min']:.4f} → {_cov['lon_max']:.4f}",
+                        help=(
+                            f"Snapped to 0.1° cells "
+                            f"{_cov['lon_cells']}"
+                        ),
+                    )
+                if _cov.get("t_min") is not None:
+                    c_c.metric(
+                        "UTC range",
+                        f"{_cov['t_min'].strftime('%Y-%m-%d %H:%M')} → "
+                        f"{_cov['t_max'].strftime('%Y-%m-%d %H:%M')}",
+                        help=f"{_cov['n_hours_used']} distinct hour buckets in range",
+                    )
+                st.caption(
+                    "Cron pipeline: each row's (lat, lon) is snapped to the nearest "
+                    "0.1° grid cell, the timestamp is UTC-hour-floored, and the "
+                    "reference product is fetched at that cell-hour. ERA5 2 m air "
+                    "temperature and the satellite SST products all follow this same "
+                    "alignment."
+                )
+                if _inland:
+                    st.info(
+                        "ℹ️  All satellite SST products are empty for this "
+                        "selection but `SAT_SST_OPENMETEO_cC` is populated — "
+                        "typical signature of an **inland / coastal deployment** "
+                        "(OISST / MUR / OSTIA are land-masked). The SST-products "
+                        "plot will auto-overlay ERA5 2 m air temperature so you "
+                        "still have a land-weather reference against the buoy."
+                    )
+
         # Per-group controls — surfaced as three compact columns so the
         # user can flip dual-axis on/off, pick which series lands on y2
         # and (for the SST product group only) toggle the buoy / air
@@ -276,10 +332,14 @@ with tab_overview:
                     _dual_enabled[_key] = bool(_on)
                     _y2_overrides[_key] = _sel
 
-        c_buoy, c_air, _spacer = st.columns([1, 1, 2])
+        st.markdown(
+            "**SST-products chart overlays** — the buoy is the point-truth; "
+            "the others are context references."
+        )
+        c_buoy, c_air, c_int, _spacer = st.columns([1, 1, 1, 1])
         with c_buoy:
             _overlay_buoy = st.toggle(
-                "Overlay buoy SST",
+                "Buoy SST",
                 value=True,
                 key="p8_overlay_buoy",
                 help=(
@@ -290,13 +350,29 @@ with tab_overview:
             )
         with c_air:
             _overlay_air = st.toggle(
-                "Overlay land / air temp",
-                value=False,
+                "Land / air temp",
+                # Auto-enable when the satellite SST products are empty
+                # and the Open-Meteo fallback indicates an inland fix —
+                # that's exactly the deployment where air temp is the
+                # only usable context reference for the buoy.
+                value=_inland,
                 key="p8_overlay_air",
                 help=(
                     "Overlay ERA5 2 m air temperature on the SST-products "
-                    "chart. Useful for inland / coastal deployments where "
-                    "the satellite SST products are land-masked."
+                    "chart. Auto-enables when the GPS track is inland and "
+                    "OISST / MUR / OSTIA are all land-masked."
+                ),
+            )
+        with c_int:
+            _overlay_internal = st.toggle(
+                "Hull internal temp",
+                value=False,
+                key="p8_overlay_internal",
+                help=(
+                    "Overlay the buoy's internal (hull) thermistor. Not a "
+                    "water-SST measurement — the sealed hull typically has "
+                    "2-3× the diurnal amplitude of 2 m air temp due to "
+                    "solar greenhouse heating."
                 ),
             )
 
@@ -306,6 +382,7 @@ with tab_overview:
             dual_axis_enabled=_dual_enabled,
             overlay_buoy_sst=_overlay_buoy,
             overlay_air_temp=_overlay_air,
+            overlay_internal_temp=_overlay_internal,
         )
         if not enriched_results:
             st.caption("No enriched columns available — run the enrichment workflows.")
@@ -384,16 +461,12 @@ with tab_b1:
             "std_diff": "{:+.3f}", "correlation": "{:.3f}",
         }), use_container_width=True)
 
-        _bias_fig = _build_pairwise_bias_bar_safe(df)
-        if _bias_fig is not None:
-            st.markdown(f"*{_DESC.get('pairwise_bias', '')}*")
-            st.plotly_chart(_bias_fig, use_container_width=True)
-
-        col_left, col_right = st.columns(2)
-        with col_left:
-            st.markdown(f"*{_DESC.get('taylor', '')}*")
-            st.plotly_chart(panels.build_taylor(df), use_container_width=True)
-        with col_right:
+        # Taylor on the main canvas; Target is a specialized secondary
+        # view (normalized bias vs uRMSE) — tucked into an expander so
+        # the default B1 view is a single metrics table + one diagram.
+        st.markdown(f"*{_DESC.get('taylor', '')}*")
+        st.plotly_chart(panels.build_taylor(df), use_container_width=True)
+        with st.expander("Target diagram (normalized bias vs uRMSE)", expanded=False):
             st.markdown(f"*{_DESC.get('target', '')}*")
             st.plotly_chart(panels.build_target(df), use_container_width=True)
 
