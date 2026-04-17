@@ -92,16 +92,16 @@ st.markdown(
 
 st.markdown(
     """
-| Source | API | Variables | Cadence | Resolution | Notes |
-|---|---|---|---|---|---|
-| **Open-Meteo Marine** | `https://marine-api.open-meteo.com/v1/marine` | wave_height, wave_period, wave_direction, wind/swell waves, **sea_surface_temperature** | Hourly cron (:15) | ~0.1° global ocean | Free, no auth. Powers `WAVE_*`, `SWELL_*`, `SAT_SST_ERA5_cC`. |
-| **Open-Meteo Archive (ERA5)** | `https://archive-api.open-meteo.com/v1/archive` | temperature_2m, humidity, surface_pressure, wind 10 m | Hourly cron (:15) | ~0.25° global | Powers `WIND_*`, `ERA5_*`. |
-| **Open-Meteo SST (unified)** | Marine + Archive combined | sea_surface_temperature with `soil_temperature_0cm` fallback | Hourly cron | ~0.1° / ~9 km | **Works over land** — this is what Richland-type coastal/inland deployments use. Powers `SAT_SST_OPENMETEO_cC`. |
-| **NOAA OISST** | ERDDAP `ncdcOisst21Agg_LonPM180` | SST | Daily cron (07:30 UTC) | 0.25° global bulk | AVHRR + in-situ blended. Powers `SAT_SST_OISST_cC`. |
-| **JPL MUR** | ERDDAP `jplMURSST41` | SST | Daily cron | 0.01° foundation SST | Highest res; ocean-only. Powers `SAT_SST_MUR_cC`. |
-| **Copernicus OSTIA** | `copernicusmarine` SDK | SST | Daily cron | 0.05° foundation SST | Requires `COPERNICUS_USERNAME/PASSWORD`. Powers `SAT_SST_OSTIA_cC`. |
-| **OSCAR surface currents** | ERDDAP (JPL PO.DAAC) | U, V surface currents | Daily cron | 0.33° 5-day composites | Powers `OSCAR_U_mms`, `OSCAR_V_mms`. |
-| **OSI SAF sea ice** | THREDDS / NetCDF | sea_ice_concentration | Daily cron | 10 km polar | Powers `SEAICE_CONC_pct`; forced to 0 in the tropics. |
+| Source | Organization | API / access point | Variables | Cadence | Resolution | Enriched columns |
+|---|---|---|---|---|---|---|
+| **Open-Meteo Marine** | [Open-Meteo.com](https://open-meteo.com/) (DWD / ECMWF re-hosting) | [marine-api.open-meteo.com](https://open-meteo.com/en/docs/marine-weather-api) | wave_height, wave_period, wave_direction, wind / swell waves, **sea_surface_temperature** | Hourly (:15) | ~0.1° global ocean | `WAVE_*`, `SWELL_*`, `SAT_SST_ERA5_cC` |
+| **Open-Meteo Archive (ERA5)** | [Open-Meteo.com](https://open-meteo.com/) / [ECMWF ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5) | [archive-api.open-meteo.com](https://open-meteo.com/en/docs/historical-weather-api) | temperature_2m, humidity, surface_pressure, wind 10 m, soil_temperature_0cm | Hourly (:15) | ~0.25° global | `WIND_*`, `ERA5_PRES_dPa`, `ERA5_AIRT_cC` |
+| **Open-Meteo SST (unified)** | Open-Meteo.com (Marine + Archive combined) | Marine + Archive endpoints above | `sea_surface_temperature` with `soil_temperature_0cm` fallback | Hourly | ~0.1° / ~9 km | `SAT_SST_OPENMETEO_cC` — **works over land** (Richland-type deployments) |
+| **NOAA OISST v2.1** | [NOAA NCEI](https://www.ncei.noaa.gov/products/optimum-interpolation-sst) | [ERDDAP `ncdcOisst21Agg_LonPM180`](https://coastwatch.pfeg.noaa.gov/erddap/griddap/ncdcOisst21Agg_LonPM180.html) | bulk SST (AVHRR + in-situ blended) | Daily (07:30 UTC) | 0.25° global bulk | `SAT_SST_OISST_cC` |
+| **JPL MUR L4 SST** | [NASA JPL PO.DAAC](https://podaac.jpl.nasa.gov/MEaSUREs-MUR) | [ERDDAP `jplMURSST41`](https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.html) | foundation SST (L4 blended) | Daily | 0.01° (~1 km) | `SAT_SST_MUR_cC` — ocean-only |
+| **OSTIA SST** | [UK Met Office](https://www.metoffice.gov.uk/research/weather/ocean-forecasting/ostia) via [Copernicus CMEMS](https://marine.copernicus.eu/) | [`copernicusmarine` SDK](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-introduction) (SST_GLO_SST_L4_NRT_OBSERVATIONS_010_001) | foundation SST | Daily | 0.05° (~5 km) | `SAT_SST_OSTIA_cC` — requires `COPERNICUS_USERNAME/PASSWORD` |
+| **OSCAR surface currents** | [NASA JPL PO.DAAC](https://podaac.jpl.nasa.gov/dataset/OSCAR_L4_OC_third-deg) | [ERDDAP `jplOscar_LonPM180`](https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplOscar_LonPM180.html) | U, V ocean surface currents | Daily (5-day composites) | 0.33° global | `OSCAR_U_mms`, `OSCAR_V_mms` |
+| **OSI SAF sea-ice concentration** | [EUMETSAT OSI SAF](https://osi-saf.eumetsat.int/products/osi-401-b) (DMI + met.no) | [THREDDS NetCDF](https://thredds.met.no/thredds/osisaf/osisaf_seaice_conc.html) (osi-401-b) | sea_ice_concentration | Daily | 10 km polar | `SEAICE_CONC_pct` (forced 0 in tropics) |
 """
 )
 

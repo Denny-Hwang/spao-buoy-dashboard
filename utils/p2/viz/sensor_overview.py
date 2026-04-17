@@ -257,17 +257,47 @@ def build_phase1_sensor_figures(
 # ──────────────────────────────────────────────────────────────────────
 # Phase 2 enriched group plots
 # ──────────────────────────────────────────────────────────────────────
+def list_dual_axis_groups() -> list[dict]:
+    """Return the subset of ``ENRICHED_GROUPS`` that a user could
+    reasonably re-assign between y1 and y2.
+
+    Groups whose series all share the same unit are excluded — they
+    now render on a single axis automatically and a per-group axis
+    selector would confuse more than help.
+    """
+    out: list[dict] = []
+    for g in ENRICHED_GROUPS:
+        series = g.get("series", [])
+        if len(series) < 2:
+            continue
+        units = {s[2] for s in series if len(s) >= 5}
+        if len(units) <= 1:
+            continue
+        out.append(g)
+    return out
+
+
 def build_enriched_group_figures(
     df: pd.DataFrame,
     time_col: str,
     dev_col: str,
+    *,
+    y2_overrides: dict[str, list[str]] | None = None,
 ) -> list[tuple[str, object, str | None]]:
     """Return ``[(title, figure_or_None, skip_reason), …]``.
 
     When a group is skipped the figure is ``None`` and ``skip_reason``
     describes why, so the caller can render a caption instead of a
     blank chart.
+
+    ``y2_overrides`` lets the caller replace a group's default axis
+    assignment — the key is the group ``key`` (e.g. ``"wind"``), the
+    value is the list of **column names** the user wants on the
+    secondary (right-hand) axis. Any column not in the list stays on
+    y1. If the group's series all share one unit this parameter is
+    ignored and everything renders on a single axis.
     """
+    y2_overrides = y2_overrides or {}
     out: list[tuple[str, object, str | None]] = []
     if df is None or df.empty or time_col not in df.columns:
         return out
@@ -303,14 +333,40 @@ def build_enriched_group_figures(
         # devices are selected we color by device and dash by variable.
         devices = base[dev_col].unique() if dev_col in base.columns else [None]
 
-        for si, entry in enumerate(group["series"]):
+        # Decide axis assignments up front:
+        # 1. If every series in the group shares the same unit, collapse
+        #    to a single y-axis (so e.g. all SST products, all in °C,
+        #    share one vertical scale instead of reading off two).
+        # 2. Otherwise, if the caller passed an override for this group,
+        #    use it (list of columns → y2). Any column not in the list
+        #    lands on y1.
+        # 3. Fall back to the group's default axis tuple.
+        series_entries = group["series"]
+        group_units = {s[2] for s in series_entries if len(s) >= 5}
+        same_unit_group = len(group_units) <= 1
+        override_cols = y2_overrides.get(group.get("key"))
+        axis_for: dict[str, str] = {}
+        for entry in series_entries:
+            if len(entry) == 5:
+                col_, _lbl, _unit, _scale, default_axis = entry
+            else:
+                col_, _lbl, _unit, _scale = entry  # type: ignore[misc]
+                default_axis = "y"
+            if same_unit_group:
+                axis_for[col_] = "y"
+            elif override_cols is not None:
+                axis_for[col_] = "y2" if col_ in override_cols else "y"
+            else:
+                axis_for[col_] = default_axis
+
+        for si, entry in enumerate(series_entries):
             # Support 4-tuple (legacy, no axis) and 5-tuple (col, label,
             # unit, scale, axis) entries.
             if len(entry) == 5:
-                col, label, unit, scale, axis = entry
+                col, label, unit, scale, _default_axis = entry
             else:
                 col, label, unit, scale = entry  # type: ignore[misc]
-                axis = "y"
+            axis = axis_for.get(col, "y")
             if col not in base.columns:
                 continue
             y = _decode(base[col], scale)
@@ -377,11 +433,28 @@ def build_enriched_group_figures(
             out.append((title, None, "no plottable points in range"))
             continue
 
+        # When the group was auto-collapsed to a single axis the default
+        # y_label (e.g. "OISST (°C)") is misleading — use a generic
+        # "<quantity> (<unit>)" label instead.
+        _unit_str = next(iter(group_units)) if same_unit_group and group_units else None
+        y_title_final = group["y_label"]
+        if same_unit_group and _unit_str:
+            _quantity = {
+                "°C": "Temperature",
+                "m/s": "Speed",
+                "deg": "Direction",
+                "m": "Height",
+                "s": "Period",
+                "Pa": "Pressure",
+                "%": "Percent",
+            }.get(_unit_str, group["y_label"])
+            y_title_final = f"{_quantity} ({_unit_str})"
+
         apply_plot_style(
             fig,
             title=title,
             x_title=time_col,
-            y_title=group["y_label"],
+            y_title=y_title_final,
         )
 
         # Secondary axis configuration — only when at least one series

@@ -234,8 +234,39 @@ with tab_overview:
             f"<h4 style='color:{PNNL_BLUE}; margin-top:8px;'>Phase 2 enriched groups</h4>",
             unsafe_allow_html=True,
         )
+
+        # Per-group 2nd-axis selector. Groups whose series all share a
+        # unit (SST products in °C, etc.) skip this UI automatically —
+        # they render on a single axis in the builder. For the rest we
+        # expose a multiselect so the user can re-route variables to y2
+        # if the default isn't ideal for their analysis.
+        _y2_overrides: dict[str, list[str]] = {}
+        _dual_groups = getattr(sensor_overview, "list_dual_axis_groups", lambda: [])()
+        if _dual_groups:
+            with st.expander("⚙️  Dual y-axis configuration (advanced)"):
+                st.caption(
+                    "Pick which variable(s) each group should plot on the "
+                    "right-hand y-axis. Leave as default to use the chart's "
+                    "built-in recommendation."
+                )
+                for _g in _dual_groups:
+                    _key = _g.get("key")
+                    _opts = [s[0] for s in _g["series"]]
+                    _label_by_col = {s[0]: f"{s[1]} — {s[0]}" for s in _g["series"]}
+                    _default_y2 = [s[0] for s in _g["series"]
+                                   if (len(s) >= 5 and s[4] == "y2")]
+                    _sel = st.multiselect(
+                        _g["title"],
+                        options=_opts,
+                        default=_default_y2,
+                        format_func=lambda c, m=_label_by_col: m.get(c, c),
+                        key=f"p8_y2_override_{_key}",
+                        help="Selected columns plot on the RIGHT-hand y-axis; unselected on the left.",
+                    )
+                    _y2_overrides[_key] = _sel
+
         enriched_results = sensor_overview.build_enriched_group_figures(
-            df, time_col, dev_col,
+            df, time_col, dev_col, y2_overrides=_y2_overrides,
         )
         if not enriched_results:
             st.caption("No enriched columns available — run the enrichment workflows.")
@@ -278,16 +309,31 @@ with tab_b1:
                     f"&nbsp;&nbsp;&nbsp;• Known bias: {info.get('bias', '—')}"
                 )
 
-    show_internal = st.checkbox(
-        "Overlay buoy internal temperature (hull thermistor)",
-        value=False,
-        key="p8_show_internal_temp",
-        help=(
-            "Internal temperature is NOT a water-SST measurement — it lives "
-            "inside the sealed hull. Toggle on to visualize thermal lag "
-            "between the water and the electronics bay."
-        ),
-    )
+    tog_col1, tog_col2 = st.columns(2)
+    with tog_col1:
+        show_internal = st.checkbox(
+            "Overlay buoy internal temperature (hull thermistor)",
+            value=False,
+            key="p8_show_internal_temp",
+            help=(
+                "Internal temperature is NOT a water-SST measurement — it "
+                "lives inside the sealed hull. Toggle on to visualize thermal "
+                "lag between the water and the electronics bay."
+            ),
+        )
+    with tog_col2:
+        show_land_air = st.checkbox(
+            "Overlay land / air temperature (ERA5 2 m)",
+            value=False,
+            key="p8_show_land_air_temp",
+            help=(
+                "ERA5 2-m air temperature at the buoy location — populated "
+                "EVERYWHERE including inland deployments. Use this when the "
+                "buoy is on land / in rivers (Richland test) and the "
+                "satellite SST products are all masked, so you still have a "
+                "'land-weather' reference to compare the buoy against."
+            ),
+        )
 
     if not per_row_ready:
         st.warning(_b_warning)
@@ -314,7 +360,11 @@ with tab_b1:
 
         st.markdown(f"*{_DESC.get('timeseries', '')}*")
         st.plotly_chart(
-            panels.build_sst_timeseries(df, include_internal_temp=show_internal),
+            panels.build_sst_timeseries(
+                df,
+                include_internal_temp=show_internal,
+                include_land_air_temp=show_land_air,
+            ),
             use_container_width=True,
         )
 
@@ -364,19 +414,32 @@ with tab_b3:
             key="p8_clear_sky",
             help="If ERA5 cloud_cover is not in the enriched schema, the toggle has no effect.",
         )
-        b3_internal = st.checkbox(
-            "Overlay buoy internal temperature (hull thermistor)",
-            value=False,
-            key="p8_b3_internal_temp",
-            help="Compare water-SST diurnal cycle vs the electronics-bay thermal response.",
-        )
+        b3_col1, b3_col2 = st.columns(2)
+        with b3_col1:
+            b3_internal = st.checkbox(
+                "Overlay buoy internal temperature (hull thermistor)",
+                value=False,
+                key="p8_b3_internal_temp",
+                help="Compare water-SST diurnal cycle vs the electronics-bay thermal response.",
+            )
+        with b3_col2:
+            b3_land_air = st.checkbox(
+                "Overlay land / air temperature (ERA5 2 m)",
+                value=False,
+                key="p8_b3_land_air_temp",
+                help="ERA5 2 m air temperature context, populated everywhere including inland buoys.",
+            )
         df_view = df
         if clear_sky and "ERA5_CLOUD_COVER" in df.columns:
             df_view = df[df["ERA5_CLOUD_COVER"] < 30]
 
         st.markdown(f"*{_DESC.get('diurnal', '')}*")
         st.plotly_chart(
-            panels.build_diurnal_composite(df_view, include_internal_temp=b3_internal),
+            panels.build_diurnal_composite(
+                df_view,
+                include_internal_temp=b3_internal,
+                include_land_air_temp=b3_land_air,
+            ),
             use_container_width=True,
         )
         st.markdown(f"*{_DESC.get('amplitude_vs_wind', '')}*")

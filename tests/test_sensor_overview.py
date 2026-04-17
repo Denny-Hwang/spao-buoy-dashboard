@@ -184,18 +184,64 @@ def test_wave_period_group_puts_direction_on_secondary_axis() -> None:
     assert all((t.yaxis or "y") == "y" for t in tp_traces)
 
 
-def test_sst_products_group_dual_y_linked_range() -> None:
-    """SST products share a unit (°C) so the secondary axis must be
-    range-locked to the primary (matches='y') to keep values
-    visually comparable while still satisfying the dual-y rule."""
+def test_sst_products_group_collapses_to_single_axis() -> None:
+    """SST products share a unit (°C) so the builder now auto-collapses
+    to a single y-axis instead of splitting across y1 / y2 — the
+    values are directly comparable and a second axis would just be
+    visual noise. Overrides the previous dual-y requirement at user
+    request (see Phase 2 figure-layout improvements)."""
     df = _make_frame()
     results = sensor_overview.build_enriched_group_figures(
         df, "Timestamp", "Device Tab",
     )
     fig = _fig_for_group_key(results, "Sea surface temperature")
     assert fig is not None
-    assert fig.layout.yaxis2 is not None
-    assert fig.layout.yaxis2.matches == "y"
+    # All SST-product traces should be on the primary axis; no yaxis2
+    # overlay should be configured.
+    for t in fig.data:
+        assert (t.yaxis or "y") == "y"
+    try:
+        overlaying = fig.layout.yaxis2.overlaying
+    except (AttributeError, KeyError):
+        overlaying = None
+    assert overlaying is None
+
+
+def test_list_dual_axis_groups_excludes_same_unit_groups() -> None:
+    """`list_dual_axis_groups` should return only groups where the
+    series have mixed units, so the Page 9 per-group y2 selector does
+    not offer pointless controls for all-°C / all-m/s groups."""
+    duals = sensor_overview.list_dual_axis_groups()
+    titles = [g["title"] for g in duals]
+    # SST products (all °C) and Ocean currents (all m/s) have shared
+    # units — must be excluded.
+    assert not any("surface temperature" in t.lower() for t in titles)
+    assert not any("ocean surface currents" in t.lower() for t in titles)
+    # Wind (m/s + deg) and Atmosphere (Pa + °C) have mixed units —
+    # must be included.
+    assert any("wind" in t.lower() for t in titles)
+    assert any("atmosphere" in t.lower() for t in titles)
+
+
+def test_y2_override_routes_columns_to_requested_axis() -> None:
+    """Passing an override dict should force named columns onto y2 and
+    leave everything else on y1, regardless of the group's default."""
+    df = _make_frame()
+    # Wind group defaults: WIND_SPD_cms -> y, WIND_DIR_deg -> y2.
+    # Flip the override so SPD lands on y2 and DIR stays on y1.
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        y2_overrides={"wind": ["WIND_SPD_cms"]},
+    )
+    fig = _fig_for_group_key(results, "Wind")
+    assert fig is not None
+    axis_by_name = {t.name: (t.yaxis or "y") for t in fig.data}
+    # Traces are named "<label>" or "<label> — <device>"; check prefix.
+    for name, axis in axis_by_name.items():
+        if name.startswith("Wind speed"):
+            assert axis == "y2"
+        if name.startswith("Wind direction"):
+            assert axis == "y"
 
 
 def test_single_series_group_has_no_secondary_axis() -> None:
