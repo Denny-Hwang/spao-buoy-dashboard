@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import math
+import os
 
 import pandas as pd
+import pytest
 
 from scripts.backfill_enrichment import (
     _COMPOUND_LAT,
     _COMPOUND_LON,
+    _coerce_ts,
     _group_rows,
     _split_compound_latlon,
+    filter_by_window,
     locate_geotemporal_columns,
 )
 
@@ -178,3 +182,50 @@ def test_enrich_open_meteo_marine_writes_sst_fallback(monkeypatch):
     assert int(raw) == int(round(9.87 * scale))
     # Wave columns still populated.
     assert int(df.at[0, "WAVE_H_cm"]) == int(round(1.25 * 100.0))
+
+
+# ---------- Timezone normalization ---------------------------------
+
+def test_coerce_ts_naive_value_with_default_tz_treated_as_utc(monkeypatch):
+    """Legacy behavior: when SHEETS_DISPLAY_TZ is unset / UTC, naive
+    timestamp strings are interpreted as UTC (no shift)."""
+    monkeypatch.delenv("SHEETS_DISPLAY_TZ", raising=False)
+    ts = _coerce_ts("2026-04-12 04:00:00")
+    assert ts == pd.Timestamp("2026-04-12 04:00:00", tz="UTC")
+
+
+def test_coerce_ts_naive_value_with_seoul_tz_converted_to_utc(monkeypatch):
+    """When the sheet is in KST, a naive '13:00' value represents 04:00
+    UTC on the same date. This is exactly the fix for the ~12 h phase
+    offset between hull temp and ERA5 air temp."""
+    monkeypatch.setenv("SHEETS_DISPLAY_TZ", "Asia/Seoul")
+    ts = _coerce_ts("2026-04-12 13:00:00")
+    assert ts == pd.Timestamp("2026-04-12 04:00:00", tz="UTC")
+
+
+def test_coerce_ts_tz_aware_input_ignores_env_tz(monkeypatch):
+    """ISO strings with explicit offsets are respected; the env var
+    is not re-applied on top of them."""
+    monkeypatch.setenv("SHEETS_DISPLAY_TZ", "Asia/Seoul")
+    ts = _coerce_ts("2026-04-12T04:00:00.000Z")
+    assert ts == pd.Timestamp("2026-04-12 04:00:00", tz="UTC")
+
+
+def test_coerce_ts_explicit_src_tz_overrides_env(monkeypatch):
+    monkeypatch.setenv("SHEETS_DISPLAY_TZ", "UTC")
+    ts = _coerce_ts("2026-04-12 13:00:00", src_tz="Asia/Seoul")
+    assert ts == pd.Timestamp("2026-04-12 04:00:00", tz="UTC")
+
+
+def test_filter_by_window_respects_sheet_tz(monkeypatch):
+    """A naive '2026-04-12 13:00' row in a KST sheet represents
+    04:00 UTC, which IS within the window [04:00 UTC, 05:00 UTC)
+    for that date. Without the fix the same value would have been
+    treated as 13:00 UTC and excluded from the window."""
+    monkeypatch.setenv("SHEETS_DISPLAY_TZ", "Asia/Seoul")
+    from datetime import date
+    df = pd.DataFrame({"Timestamp": ["2026-04-12 13:00:00"]})
+    idx = filter_by_window(df, "Timestamp", date(2026, 4, 12), date(2026, 4, 12))
+    # Window is [2026-04-12 00:00 UTC, 2026-04-13 00:00 UTC).
+    # KST 13:00 on 2026-04-12 = 04:00 UTC on 2026-04-12 → inside window.
+    assert list(idx) == [0]

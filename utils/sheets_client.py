@@ -3,6 +3,7 @@ Google Sheets client for reading/writing SPAO buoy data via gspread.
 Supports both webhook-decoded data and raw RockBLOCK CSV exports.
 """
 
+import os
 import re
 
 import gspread
@@ -23,6 +24,85 @@ EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
+
+# ──────────────────────────────────────────────────────────────────────
+# Timestamp timezone handling
+#
+# The Apps Script writes `new Date().toISOString()` (UTC) into the sheet,
+# but Google Sheets implicitly reformats Date values using the
+# spreadsheet's own "Display Time Zone" setting. When the spreadsheet
+# is configured to a non-UTC zone (e.g. Asia/Seoul = UTC+9), gspread
+# reads back naive local-time strings like "2026-04-12 13:00:00" with
+# no tz suffix. Naively parsing those as UTC then misaligns every
+# downstream operation that depends on the timestamp — most visibly,
+# the Open-Meteo ERA5 fetcher ends up pulling air temp for the WRONG
+# hour of the day, producing the ~12 h phase offset against the hull
+# thermistor that operators have been flagging.
+#
+# Fix: expose ``SHEETS_DISPLAY_TZ`` via Streamlit secrets / env var.
+# When set (e.g. ``Asia/Seoul``), :func:`normalize_ts_to_utc` treats
+# naive timestamps as local-time in that zone and converts them to
+# true UTC. tz-aware inputs are converted straight through. Defaults
+# to ``UTC`` so existing deployments behave unchanged until the
+# operator opts in.
+# ──────────────────────────────────────────────────────────────────────
+def _get_sheets_display_tz() -> str:
+    """Return the spreadsheet's Display Time Zone for naive timestamps.
+
+    Reads from (in order):
+    1. ``st.secrets["SHEETS_DISPLAY_TZ"]``
+    2. the ``SHEETS_DISPLAY_TZ`` environment variable
+    3. ``"UTC"`` — preserves prior behavior for deployments whose sheet
+       is already in UTC.
+    """
+    try:
+        if hasattr(st, "secrets"):
+            tz = st.secrets.get("SHEETS_DISPLAY_TZ", None)
+            if tz:
+                return str(tz)
+    except Exception:  # noqa: BLE001
+        pass
+    return os.environ.get("SHEETS_DISPLAY_TZ", "UTC") or "UTC"
+
+
+def normalize_ts_to_utc(
+    values,
+    src_tz: str | None = None,
+) -> pd.Series:
+    """Parse a timestamp column and return it as a **naive UTC** Series.
+
+    - Naive input values (no "Z" / no "+HH:MM" suffix) are localized to
+      ``src_tz`` first and then converted to UTC. The ``src_tz`` info
+      is stripped afterwards so the returned Series is tz-naive —
+      Phase 1 pages depend on naive timestamps and we preserve that
+      wire format while making the VALUES correct.
+    - tz-aware values (e.g. ISO strings ending in "Z") are converted to
+      UTC and likewise returned tz-naive.
+    - Unparseable values become ``NaT`` without raising.
+
+    ``src_tz`` defaults to :func:`_get_sheets_display_tz()`. When
+    ``src_tz`` is ``"UTC"`` (the legacy behavior) this is a no-op —
+    naive values are left alone exactly as before.
+    """
+    if src_tz is None:
+        src_tz = _get_sheets_display_tz()
+    parsed = pd.to_datetime(values, errors="coerce", format="mixed")
+    if parsed.dt.tz is None:
+        # Already naive — legacy behavior was to leave it as-is and
+        # let downstream code assume it's UTC. Only shift the values
+        # when the operator has opted in to a non-UTC display zone.
+        if src_tz and src_tz != "UTC":
+            parsed = (
+                parsed.dt.tz_localize(
+                    src_tz, nonexistent="shift_forward", ambiguous="NaT",
+                )
+                .dt.tz_convert("UTC")
+                .dt.tz_localize(None)
+            )
+        return parsed
+    # tz-aware input → convert to UTC, then strip tz to keep the
+    # column naive for downstream Phase 1 consumers.
+    return parsed.dt.tz_convert("UTC").dt.tz_localize(None)
 
 
 @st.cache_resource
@@ -188,7 +268,7 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
     if "Timestamp" in df.columns:
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", format="mixed")
+        df["Timestamp"] = normalize_ts_to_utc(df["Timestamp"])
 
     return reorder_columns(df)
 

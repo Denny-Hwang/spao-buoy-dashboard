@@ -281,11 +281,45 @@ def _coerce_float(val: Any) -> float:
         return float("nan")
 
 
-def _coerce_ts(val: Any) -> pd.Timestamp:
+def _sheets_display_tz() -> str:
+    """Return the spreadsheet's Display Time Zone for naive timestamps.
+
+    Mirrors :func:`utils.sheets_client._get_sheets_display_tz` — the
+    cron enrichment runs outside Streamlit so it reads the zone from
+    the ``SHEETS_DISPLAY_TZ`` environment variable (set via GitHub
+    Actions secret), defaulting to UTC for backward compatibility.
+
+    Non-UTC zones are essential: Google Sheets reformats ``Date``
+    values in the spreadsheet's own zone (e.g. Asia/Seoul), so gspread
+    reads back naive local-time strings that must be converted back to
+    true UTC before they're used as the reference hour for Open-Meteo /
+    ERDDAP lookups — otherwise every enriched row gets assigned
+    temperature / wind / SST from the wrong hour, producing the
+    characteristic ~12 h phase-offset against the buoy's hull
+    thermistor.
+    """
+    return os.environ.get("SHEETS_DISPLAY_TZ", "UTC") or "UTC"
+
+
+def _coerce_ts(val: Any, src_tz: str | None = None) -> pd.Timestamp:
+    if pd.isna(val):
+        return pd.NaT
     try:
-        return pd.Timestamp(val, tz="UTC") if not pd.isna(val) else pd.NaT
+        ts = pd.Timestamp(val)
     except Exception:
         return pd.NaT
+    if ts.tz is None:
+        src_tz = src_tz or _sheets_display_tz()
+        try:
+            if src_tz and src_tz != "UTC":
+                ts = ts.tz_localize(src_tz).tz_convert("UTC")
+            else:
+                ts = ts.tz_localize("UTC")
+        except Exception:
+            return pd.NaT
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts
 
 
 def _is_missing_gps(lat: float, lon: float) -> bool:
@@ -333,7 +367,22 @@ def filter_by_window(
 ) -> pd.Index:
     if start is None and end is None:
         return df.index
-    ts = pd.to_datetime(df[ts_col], errors="coerce", utc=True)
+    # Localize naive timestamps via the spreadsheet Display Time Zone
+    # before comparing against UTC window bounds, so rows written by
+    # Apps Script into a non-UTC sheet (e.g. Asia/Seoul) are not
+    # shifted by the zone offset when a --start-date / --end-date
+    # filter is applied.
+    src_tz = _sheets_display_tz()
+    parsed = pd.to_datetime(df[ts_col], errors="coerce", format="mixed")
+    if parsed.dt.tz is None:
+        if src_tz and src_tz != "UTC":
+            ts = parsed.dt.tz_localize(
+                src_tz, nonexistent="shift_forward", ambiguous="NaT",
+            ).dt.tz_convert("UTC")
+        else:
+            ts = parsed.dt.tz_localize("UTC")
+    else:
+        ts = parsed.dt.tz_convert("UTC")
     mask = pd.Series(True, index=df.index)
     if start is not None:
         start_ts = pd.Timestamp(start, tz="UTC")
