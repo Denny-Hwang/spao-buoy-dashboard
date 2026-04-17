@@ -236,58 +236,34 @@ def test_filter_by_window_respects_sheet_tz(monkeypatch):
     assert list(idx) == [0]
 
 
-# ---------- GPS-based per-row TZ on the cron side -------------------
+# ---------- Chronological-order preservation under outlier GPS -----
 
-_HAS_TZFINDER = pytest.importorskip.__self__ if False else None  # placeholder
-
-
-def _tzfinder_available() -> bool:
-    import importlib.util
-    return importlib.util.find_spec("timezonefinder") is not None
-
-
-@pytest.mark.skipif(not _tzfinder_available(), reason="timezonefinder not installed")
-def test_coerce_ts_uses_gps_tz_when_no_env_override(monkeypatch):
-    """GPS fallback: a Seoul-located buoy's naive '13:00' resolves to
-    04:00 UTC without any env var set."""
-    monkeypatch.delenv("SHEETS_DISPLAY_TZ", raising=False)
-    # Clear any cached lookup from previous tests so we actually hit
-    # the GPS branch rather than a pre-populated env override.
-    import scripts.backfill_enrichment as bf
-    bf._GPS_TZ_CACHE.clear()
-    ts = _coerce_ts("2026-04-12 13:00:00", lat=37.5, lon=127.0)
-    assert ts == pd.Timestamp("2026-04-12 04:00:00", tz="UTC")
-
-
-@pytest.mark.skipif(not _tzfinder_available(), reason="timezonefinder not installed")
-def test_coerce_ts_env_override_beats_gps(monkeypatch):
-    """Explicit override wins even when GPS is supplied."""
+def test_group_rows_preserves_chronology_under_outlier_gps(monkeypatch):
+    """Regression guard: a single outlier GPS row must not get its
+    hour-bucket shifted relative to its neighbours. _group_rows is
+    column-uniform on TZ (via _coerce_ts reading SHEETS_DISPLAY_TZ),
+    so rows 112/113/114 stay in time order even if row 113's GPS
+    lands in a different IANA zone."""
     monkeypatch.setenv("SHEETS_DISPLAY_TZ", "UTC")
-    import scripts.backfill_enrichment as bf
-    bf._GPS_TZ_CACHE.clear()
-    ts = _coerce_ts("2026-04-12 13:00:00", lat=37.5, lon=127.0)
-    # Env says UTC → the naive value is 13:00 UTC, not 04:00.
-    assert ts == pd.Timestamp("2026-04-12 13:00:00", tz="UTC")
-
-
-@pytest.mark.skipif(not _tzfinder_available(), reason="timezonefinder not installed")
-def test_group_rows_buckets_via_gps_tz(monkeypatch):
-    """_group_rows should use the GPS-based TZ for each row's hour
-    bucket. Two rows 9 h apart in sheet time (one in Seoul, one in
-    Richland WA) are only ~2 h apart in real UTC hours if the Seoul
-    row is at 13:00 KST and the WA row is at 06:00 PDT — which is
-    exactly 04:00 UTC and 13:00 UTC respectively."""
-    monkeypatch.delenv("SHEETS_DISPLAY_TZ", raising=False)
-    import scripts.backfill_enrichment as bf
-    bf._GPS_TZ_CACHE.clear()
     df = pd.DataFrame({
-        "Timestamp": ["2026-04-12 13:00:00", "2026-04-12 06:00:00"],
-        "Lat": [37.5, 46.3],
-        "Lon": [127.0, -119.3],
+        "Timestamp": [
+            "2026-04-11 00:00:00",
+            "2026-04-11 00:30:00",
+            "2026-04-11 01:00:00",
+        ],
+        # Middle row has a totally different GPS; under the reverted
+        # per-row path this would have shifted row 1's bucket.
+        "Lat": [58.3, 37.5, 58.3],
+        "Lon": [-170.0, 127.0, -170.0],
     })
-    groups = bf._group_rows(df, df.index, "Timestamp", "Lat", "Lon", bucket="H")
-    # Two distinct (cell, hour) buckets; the hours should be 04 UTC
-    # and 13 UTC, not 13 UTC for both (which is what the pre-fix
-    # behavior would have produced).
-    hours_utc = sorted(int(h.hour) for (_, _, h) in groups.keys())
-    assert hours_utc == [4, 13]
+    groups = _group_rows(df, df.index, "Timestamp", "Lat", "Lon", bucket="H")
+    # Buckets are keyed by (snapped_lat, snapped_lon, hour). The point
+    # of the test is that the HOUR component for each row matches the
+    # row's UTC hour independent of its GPS cell — i.e. row 1's hour
+    # is still 00 UTC (matching its sheet timestamp), not shifted by
+    # the Seoul zone offset.
+    hour_by_row: dict[int, int] = {}
+    for (_lat, _lon, hour), idxs in groups.items():
+        for i in idxs:
+            hour_by_row[i] = int(hour.hour)
+    assert hour_by_row == {0: 0, 1: 0, 2: 1}

@@ -281,85 +281,37 @@ def _coerce_float(val: Any) -> float:
         return float("nan")
 
 
-def _sheets_display_tz_override() -> str | None:
-    """Return an operator-provided fixed source TZ override, or ``None``.
+def _sheets_display_tz() -> str:
+    """Return the spreadsheet's Display Time Zone from the cron env.
 
-    When set (via ``SHEETS_DISPLAY_TZ`` env var on the cron runner),
-    this forces every naive timestamp to be interpreted as local-time
-    in that zone. When unset (recommended), each row's source TZ is
-    auto-detected from its own (lat, lon) GPS fix via
-    :func:`_tz_for_gps`, so a buoy that drifts between zones stays
-    correctly aligned without any hardcoded sheet-wide assumption.
+    Mirrors :func:`utils.sheets_client._get_sheets_display_tz`. Defaults
+    to ``"UTC"`` for sheets that already store in UTC. A sheet is always
+    stored in a single zone, so this is column-uniform — see the
+    commentary in sheets_client for why per-row GPS-based lookup was
+    tried and reverted (outlier GPS fixes breaking chronological
+    ordering in the Data Explorer).
     """
-    val = os.environ.get("SHEETS_DISPLAY_TZ", "") or ""
-    return val.strip() or None
-
-
-_GPS_TZ_CACHE: dict[tuple[float, float], str] = {}
-_TZ_FINDER_SINGLETON = None
-_TZ_FINDER_UNAVAILABLE = False
-
-
-def _tz_finder_bf():
-    global _TZ_FINDER_SINGLETON, _TZ_FINDER_UNAVAILABLE
-    if _TZ_FINDER_UNAVAILABLE:
-        return None
-    if _TZ_FINDER_SINGLETON is not None:
-        return _TZ_FINDER_SINGLETON
-    try:
-        from timezonefinder import TimezoneFinder  # type: ignore
-    except Exception:  # noqa: BLE001
-        _TZ_FINDER_UNAVAILABLE = True
-        return None
-    _TZ_FINDER_SINGLETON = TimezoneFinder(in_memory=True)
-    return _TZ_FINDER_SINGLETON
-
-
-def _tz_for_gps(lat: Any, lon: Any) -> str | None:
-    """Return the IANA zone that covers ``(lat, lon)``, or ``None``.
-
-    0.1° cell cache keeps lookups O(1) for stationary buoys. Missing
-    / invalid / (0, 0) coordinates return ``None`` so callers can fall
-    back to UTC for those rows only.
-    """
-    try:
-        flat = float(lat)
-        flon = float(lon)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(flat) or math.isnan(flon):
-        return None
-    if abs(flat) < 1e-9 and abs(flon) < 1e-9:
-        return None
-    key = (round(flat * 10) / 10.0, round(flon * 10) / 10.0)
-    if key in _GPS_TZ_CACHE:
-        return _GPS_TZ_CACHE[key] or None
-    tf = _tz_finder_bf()
-    if tf is None:
-        return None
-    try:
-        name = tf.timezone_at(lat=flat, lng=flon)
-    except Exception:  # noqa: BLE001
-        name = None
-    _GPS_TZ_CACHE[key] = name or ""
-    return name or None
+    return (os.environ.get("SHEETS_DISPLAY_TZ", "") or "").strip() or "UTC"
 
 
 def _coerce_ts(
     val: Any,
     *,
+    src_tz: str | None = None,
+    # lat/lon accepted for API compatibility only; ignored.
     lat: Any = None,
     lon: Any = None,
-    src_tz: str | None = None,
 ) -> pd.Timestamp:
     """Parse a sheet timestamp into tz-aware UTC.
 
     Source-TZ resolution for **naive** inputs:
         1. ``src_tz`` kwarg (explicit override).
         2. ``SHEETS_DISPLAY_TZ`` env var (operator-set fixed zone).
-        3. Per-row GPS lookup via :func:`_tz_for_gps` when ``lat`` and
-           ``lon`` are provided AND ``timezonefinder`` is installed.
-        4. ``"UTC"`` — legacy fallback.
+        3. ``"UTC"`` — legacy fallback.
+
+    Column-uniform: all rows get the same zone treatment so a single
+    outlier GPS fix cannot shift one row's hour bucket relative to
+    its neighbours.
     """
     if pd.isna(val):
         return pd.NaT
@@ -370,9 +322,7 @@ def _coerce_ts(
     if ts.tz is not None:
         return ts.tz_convert("UTC")
 
-    resolved = src_tz or _sheets_display_tz_override()
-    if resolved is None and lat is not None and lon is not None:
-        resolved = _tz_for_gps(lat, lon)
+    resolved = src_tz or _sheets_display_tz()
     try:
         if resolved and resolved != "UTC":
             return ts.tz_localize(resolved).tz_convert("UTC")
@@ -426,42 +376,15 @@ def filter_by_window(
 ) -> pd.Index:
     if start is None and end is None:
         return df.index
-    # Localize naive timestamps before comparing against UTC window
-    # bounds. Preference order matches _coerce_ts:
-    #   1. SHEETS_DISPLAY_TZ env override
-    #   2. Per-row GPS-based IANA zone (requires timezonefinder)
-    #   3. UTC fallback
-    src_tz = _sheets_display_tz_override()
+    # Localize naive timestamps with the sheet-wide SHEETS_DISPLAY_TZ
+    # before comparing against UTC window bounds.
+    src_tz = _sheets_display_tz()
     parsed = pd.to_datetime(df[ts_col], errors="coerce", format="mixed")
-    if parsed.dt.tz is None and src_tz is not None:
-        ts = parsed.dt.tz_localize(
-            src_tz, nonexistent="shift_forward", ambiguous="NaT",
-        ).dt.tz_convert("UTC")
-    elif parsed.dt.tz is None:
-        # Try GPS-based per-row lookup when geo columns are available.
-        try:
-            ts_col_found, lat_col, lon_col = locate_geotemporal_columns(df)
-        except Exception:  # noqa: BLE001
-            lat_col = lon_col = None  # type: ignore[assignment]
-        if lat_col and lon_col and _tz_finder_bf() is not None:
-            out: list[pd.Timestamp] = []
-            for i, raw in enumerate(parsed.tolist()):
-                if pd.isna(raw):
-                    out.append(pd.NaT)
-                    continue
-                lat = _coerce_float(df[lat_col].iloc[i])
-                lon = _coerce_float(df[lon_col].iloc[i])
-                row_tz = _tz_for_gps(lat, lon) or "UTC"
-                try:
-                    if row_tz != "UTC":
-                        out.append(
-                            pd.Timestamp(raw).tz_localize(row_tz).tz_convert("UTC")
-                        )
-                    else:
-                        out.append(pd.Timestamp(raw).tz_localize("UTC"))
-                except Exception:  # noqa: BLE001
-                    out.append(pd.NaT)
-            ts = pd.Series(out, index=df.index)
+    if parsed.dt.tz is None:
+        if src_tz and src_tz != "UTC":
+            ts = parsed.dt.tz_localize(
+                src_tz, nonexistent="shift_forward", ambiguous="NaT",
+            ).dt.tz_convert("UTC")
         else:
             ts = parsed.dt.tz_localize("UTC")
     else:
@@ -491,12 +414,7 @@ def _group_rows(
     for idx in rows:
         lat = _coerce_float(df.at[idx, lat_col])
         lon = _coerce_float(df.at[idx, lon_col])
-        # Pass the row's own GPS into _coerce_ts so naive timestamps
-        # get localized against THAT row's local IANA zone before the
-        # UTC hour-bucket is computed. This is what keeps a drifting
-        # buoy's Open-Meteo lookups aligned to its actual solar hour
-        # regardless of how the spreadsheet is formatted.
-        ts = _coerce_ts(df.at[idx, ts_col], lat=lat, lon=lon)
+        ts = _coerce_ts(df.at[idx, ts_col])
         if math.isnan(lat) or math.isnan(lon) or pd.isna(ts) or _is_missing_gps(lat, lon):
             continue
         key = (snap(lat), snap(lon), time_bucket(ts, bucket))  # type: ignore[arg-type]
@@ -537,11 +455,7 @@ def enrich_open_meteo_marine(
         if frame is None or frame.empty:
             continue
         for idx in idxs:
-            ts = _coerce_ts(
-                df.at[idx, ts_col],
-                lat=df.at[idx, lat_col],
-                lon=df.at[idx, lon_col],
-            )
+            ts = _coerce_ts(df.at[idx, ts_col])
             if pd.isna(ts):
                 continue
             hour = time_bucket(ts, "H")
@@ -590,11 +504,7 @@ def enrich_open_meteo_sst(
         if frame is None or frame.empty:
             continue
         for idx in idxs:
-            ts = _coerce_ts(
-                df.at[idx, ts_col],
-                lat=df.at[idx, lat_col],
-                lon=df.at[idx, lon_col],
-            )
+            ts = _coerce_ts(df.at[idx, ts_col])
             if pd.isna(ts):
                 continue
             hour = time_bucket(ts, "H")
@@ -625,11 +535,7 @@ def enrich_open_meteo_historical(
         if frame is None or frame.empty:
             continue
         for idx in idxs:
-            ts = _coerce_ts(
-                df.at[idx, ts_col],
-                lat=df.at[idx, lat_col],
-                lon=df.at[idx, lon_col],
-            )
+            ts = _coerce_ts(df.at[idx, ts_col])
             if pd.isna(ts):
                 continue
             hour = time_bucket(ts, "H")
