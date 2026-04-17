@@ -257,6 +257,116 @@ def build_phase1_sensor_figures(
 # ──────────────────────────────────────────────────────────────────────
 # Phase 2 enriched group plots
 # ──────────────────────────────────────────────────────────────────────
+def summarize_enrichment_coverage(
+    df: pd.DataFrame,
+    time_col: str,
+) -> dict:
+    """Return a compact snapshot of the GPS + time range that was used
+    to populate the Phase 2 enriched columns.
+
+    The cron pipeline snaps each buoy row's (lat, lon) to a 0.1° grid
+    cell, hour-buckets the timestamp to UTC, then fetches the Open-Meteo
+    / satellite reference at that cell-hour. To let a user visually
+    confirm the reference is being fetched at the same place & time as
+    the buoy, this helper reports:
+
+        - ``n_rows``:        how many rows are in the current selection
+        - ``lat_min/max``:   actual lat range (°) of the selected rows
+        - ``lon_min/max``:   actual lon range (°)
+        - ``lat_cells``:     set of 0.1°-snapped latitude cells used
+        - ``lon_cells``:     set of 0.1°-snapped longitude cells used
+        - ``t_min/max``:     UTC time range
+        - ``n_hours_used``:  distinct hour-buckets in the selection
+        - ``inland_hint``:   True when all satellite-SST columns are NaN
+                             AND ``SAT_SST_OPENMETEO_cC`` *is* populated,
+                             which is the signature of an inland / coastal
+                             GPS fix (OISST/MUR/OSTIA are land-masked).
+
+    All fields default to ``None`` when the frame is empty so callers
+    can render a polite "no data" caption instead of a traceback.
+    """
+    out: dict = {
+        "n_rows": 0,
+        "lat_min": None, "lat_max": None,
+        "lon_min": None, "lon_max": None,
+        "lat_cells": [],
+        "lon_cells": [],
+        "t_min": None, "t_max": None,
+        "n_hours_used": 0,
+        "inland_hint": False,
+    }
+    if df is None or df.empty:
+        return out
+    out["n_rows"] = int(len(df))
+
+    lat_col = None
+    for cand in ("Lat", "Latitude", "lat"):
+        if cand in df.columns:
+            lat_col = cand
+            break
+    if lat_col is None:
+        for c in df.columns:
+            if "lat" in str(c).lower():
+                lat_col = c
+                break
+    lon_col = None
+    for cand in ("Lon", "Longitude", "lon", "Lng"):
+        if cand in df.columns:
+            lon_col = cand
+            break
+    if lon_col is None:
+        for c in df.columns:
+            cl = str(c).lower()
+            if ("lon" in cl or "lng" in cl) and not any(
+                x in cl for x in ("longevity", "long-term", "longterm")
+            ):
+                lon_col = c
+                break
+
+    if lat_col is not None:
+        lat = pd.to_numeric(df[lat_col], errors="coerce").dropna()
+        # Treat the (0, 0) sentinel ("no GPS fix") as missing.
+        if lon_col is not None:
+            lon_tmp = pd.to_numeric(df[lon_col], errors="coerce").reindex(lat.index)
+            lat = lat[~((lat.abs() < 1e-9) & (lon_tmp.abs() < 1e-9))]
+        if not lat.empty:
+            out["lat_min"] = float(lat.min())
+            out["lat_max"] = float(lat.max())
+            # 0.1° snap mirrors utils/p2/sources/grid.py :: snap()
+            out["lat_cells"] = sorted({round(round(v * 10) / 10, 1) for v in lat})
+
+    if lon_col is not None:
+        lon = pd.to_numeric(df[lon_col], errors="coerce").dropna()
+        if lat_col is not None:
+            lat_tmp = pd.to_numeric(df[lat_col], errors="coerce").reindex(lon.index)
+            lon = lon[~((lon.abs() < 1e-9) & (lat_tmp.abs() < 1e-9))]
+        if not lon.empty:
+            out["lon_min"] = float(lon.min())
+            out["lon_max"] = float(lon.max())
+            out["lon_cells"] = sorted({round(round(v * 10) / 10, 1) for v in lon})
+
+    if time_col and time_col in df.columns:
+        ts = pd.to_datetime(df[time_col], errors="coerce", utc=True).dropna()
+        if not ts.empty:
+            out["t_min"] = ts.min()
+            out["t_max"] = ts.max()
+            out["n_hours_used"] = int(ts.dt.floor("h").nunique())
+
+    sat_cols = ("SAT_SST_OISST_cC", "SAT_SST_MUR_cC", "SAT_SST_OSTIA_cC")
+    openmeteo_col = "SAT_SST_OPENMETEO_cC"
+    sat_all_nan = all(
+        c not in df.columns or not pd.to_numeric(df[c], errors="coerce").notna().any()
+        for c in sat_cols
+    )
+    om_has_data = (
+        openmeteo_col in df.columns
+        and pd.to_numeric(df[openmeteo_col], errors="coerce").notna().any()
+    )
+    out["inland_hint"] = bool(sat_all_nan and om_has_data)
+
+    return out
+
+
 def list_dual_axis_groups() -> list[dict]:
     """Return the subset of ``ENRICHED_GROUPS`` that a user could
     reasonably re-assign between y1 and y2.
@@ -286,6 +396,7 @@ def build_enriched_group_figures(
     dual_axis_enabled: dict[str, bool] | None = None,
     overlay_buoy_sst: bool = True,
     overlay_air_temp: bool = False,
+    overlay_internal_temp: bool = False,
 ) -> list[tuple[str, object, str | None]]:
     """Return ``[(title, figure_or_None, skip_reason), …]``.
 
@@ -334,22 +445,27 @@ def build_enriched_group_figures(
         is_sst_group = bool(group.get("overlay_buoy_sst"))
         wants_buoy_overlay = is_sst_group and overlay_buoy_sst
         wants_air_overlay = is_sst_group and overlay_air_temp
-        if wants_buoy_overlay or wants_air_overlay:
+        wants_internal_overlay = is_sst_group and overlay_internal_temp
+        if wants_buoy_overlay or wants_air_overlay or wants_internal_overlay:
             buoy_col = _find_col_by_keywords(
                 base, ("sst_buoy", "water temp", "ocean temp", "sst"),
             )
             air_col = _find_col_by_keywords(
                 base, ("era5_airt",),
             )
+            internal_col = _find_col_by_keywords(
+                base, ("internal temp", "int temp"),
+            )
             has_overlay_data = (
                 (wants_buoy_overlay and buoy_col is not None)
                 or (wants_air_overlay and air_col is not None)
+                or (wants_internal_overlay and internal_col is not None)
             )
             if reason is not None and not has_overlay_data:
                 out.append((title, None, reason))
                 continue
             if has_overlay_data:
-                reason = None  # at least one of: buoy / air / a product
+                reason = None  # at least one of: buoy / air / internal / a product
 
         if reason is not None:
             out.append((title, None, reason))
@@ -494,6 +610,28 @@ def build_enriched_group_figures(
                         name="Land / air temp (ERA5 2 m)",
                         line=dict(width=1.4, color="#8E24AA", dash="dashdot"),
                         opacity=0.75,
+                        yaxis="y",
+                    ))
+                    plotted_any = True
+
+        # SST products: optional buoy internal (hull) temperature overlay.
+        # Not a water-SST measurement — the sensor lives inside the sealed
+        # hull so its diurnal amplitude is typically 2-3x the ambient 2 m
+        # air temp amplitude due to greenhouse heating. Useful for
+        # diagnosing thermal coupling between the electronics bay and the
+        # ambient environment.
+        if is_sst_group and overlay_internal_temp:
+            int_col = _find_col_by_keywords(base, ("internal temp", "int temp"))
+            if int_col is not None:
+                itemp = pd.to_numeric(base[int_col], errors="coerce")
+                if itemp.notna().any():
+                    fig.add_trace(go.Scatter(
+                        x=base[time_col],
+                        y=itemp,
+                        mode="lines",
+                        name="Buoy internal temp (hull, NOT water)",
+                        line=dict(width=1.2, color="#9CA3AF", dash="dot"),
+                        opacity=0.7,
                         yaxis="y",
                     ))
                     plotted_any = True
