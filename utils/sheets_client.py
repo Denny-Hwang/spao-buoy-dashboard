@@ -26,34 +26,34 @@ EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
 
 # ──────────────────────────────────────────────────────────────────────
-# Timestamp timezone handling
+# Timestamp timezone handling — GPS-based
 #
-# The Apps Script writes `new Date().toISOString()` (UTC) into the sheet,
-# but Google Sheets implicitly reformats Date values using the
-# spreadsheet's own "Display Time Zone" setting. When the spreadsheet
-# is configured to a non-UTC zone (e.g. Asia/Seoul = UTC+9), gspread
-# reads back naive local-time strings like "2026-04-12 13:00:00" with
-# no tz suffix. Naively parsing those as UTC then misaligns every
-# downstream operation that depends on the timestamp — most visibly,
-# the Open-Meteo ERA5 fetcher ends up pulling air temp for the WRONG
-# hour of the day, producing the ~12 h phase offset against the hull
-# thermistor that operators have been flagging.
+# Symptom: buoy hull thermistor and ERA5 2 m air temperature are
+# rendering with a ~12 h phase offset on Page 9. Root cause: the
+# Apps Script stores timestamps into the sheet but Google Sheets
+# reformats ``Date`` values using the spreadsheet's Display Time Zone,
+# so gspread reads back naive local-time strings like
+# "2026-04-12 13:00:00" with no tz suffix. Both the Streamlit read and
+# the cron enrichment were assuming UTC, so every Open-Meteo / ERA5
+# lookup landed on the wrong hour and the resulting column was phase-
+# shifted against the hull reading.
 #
-# Fix: expose ``SHEETS_DISPLAY_TZ`` via Streamlit secrets / env var.
-# When set (e.g. ``Asia/Seoul``), :func:`normalize_ts_to_utc` treats
-# naive timestamps as local-time in that zone and converts them to
-# true UTC. tz-aware inputs are converted straight through. Defaults
-# to ``UTC`` so existing deployments behave unchanged until the
-# operator opts in.
+# Fix: when a naive timestamp is paired with a GPS fix, look up the
+# IANA timezone that covers that (lat, lon) and interpret the naive
+# value as local-time in THAT zone. This is done per-row so buoys
+# that drift across zone boundaries (e.g. the Bering Sea → Gulf of
+# Alaska track) stay aligned without any hardcoded assumption. An
+# explicit ``SHEETS_DISPLAY_TZ`` env var / Streamlit secret still
+# overrides the GPS lookup for operators whose sheet is configured
+# to a fixed zone.
 # ──────────────────────────────────────────────────────────────────────
-def _get_sheets_display_tz() -> str:
-    """Return the spreadsheet's Display Time Zone for naive timestamps.
+def _get_sheets_display_tz_override() -> str | None:
+    """Return the operator-provided Display Time Zone override, or None.
 
-    Reads from (in order):
+    Resolution order:
     1. ``st.secrets["SHEETS_DISPLAY_TZ"]``
-    2. the ``SHEETS_DISPLAY_TZ`` environment variable
-    3. ``"UTC"`` — preserves prior behavior for deployments whose sheet
-       is already in UTC.
+    2. ``SHEETS_DISPLAY_TZ`` environment variable
+    3. ``None`` — delegates to GPS-based per-row auto-detection.
     """
     try:
         if hasattr(st, "secrets"):
@@ -62,47 +62,172 @@ def _get_sheets_display_tz() -> str:
                 return str(tz)
     except Exception:  # noqa: BLE001
         pass
-    return os.environ.get("SHEETS_DISPLAY_TZ", "UTC") or "UTC"
+    val = os.environ.get("SHEETS_DISPLAY_TZ", "") or ""
+    return val.strip() or None
+
+
+_GPS_TZ_CACHE: dict[tuple[float, float], str] = {}
+_TZ_FINDER_SINGLETON = None
+_TZ_FINDER_UNAVAILABLE = False
+
+
+def _tz_finder():
+    """Return a cached ``TimezoneFinder`` instance or None if the
+    package is unavailable in this environment (e.g. lightweight test
+    runs)."""
+    global _TZ_FINDER_SINGLETON, _TZ_FINDER_UNAVAILABLE
+    if _TZ_FINDER_UNAVAILABLE:
+        return None
+    if _TZ_FINDER_SINGLETON is not None:
+        return _TZ_FINDER_SINGLETON
+    try:
+        from timezonefinder import TimezoneFinder  # type: ignore
+    except Exception:  # noqa: BLE001
+        _TZ_FINDER_UNAVAILABLE = True
+        return None
+    _TZ_FINDER_SINGLETON = TimezoneFinder(in_memory=True)
+    return _TZ_FINDER_SINGLETON
+
+
+def tz_for_gps(lat: float, lon: float) -> str | None:
+    """Return the IANA zone covering ``(lat, lon)``, or ``None``.
+
+    Uses a small per-cell cache (0.1° snap) so repeated calls from the
+    same grid are O(1). Returns ``None`` when coordinates are missing,
+    invalid, or the ``timezonefinder`` package isn't available.
+    """
+    try:
+        flat = float(lat)
+        flon = float(lon)
+    except (TypeError, ValueError):
+        return None
+    import math as _math
+    if _math.isnan(flat) or _math.isnan(flon):
+        return None
+    if abs(flat) < 1e-9 and abs(flon) < 1e-9:
+        return None
+    # Cache on the 0.1° grid — same granularity as the enrichment
+    # fetchers — to avoid repeated lookups on a stationary buoy.
+    key = (round(flat * 10) / 10.0, round(flon * 10) / 10.0)
+    if key in _GPS_TZ_CACHE:
+        return _GPS_TZ_CACHE[key] or None
+    tf = _tz_finder()
+    if tf is None:
+        return None
+    try:
+        name = tf.timezone_at(lat=flat, lng=flon)
+    except Exception:  # noqa: BLE001
+        name = None
+    _GPS_TZ_CACHE[key] = name or ""
+    return name or None
+
+
+def _localize_one(val, src_tz: str | None):
+    """Parse ``val`` into a tz-aware UTC Timestamp (or NaT).
+
+    Used by :func:`normalize_ts_to_utc` for the per-row GPS path where
+    every row may have a different ``src_tz``. Naive values are
+    localized using ``src_tz`` (falling back to UTC when unknown).
+    """
+    if pd.isna(val):
+        return pd.NaT
+    try:
+        ts = pd.Timestamp(val)
+    except Exception:  # noqa: BLE001
+        return pd.NaT
+    if ts.tz is None:
+        try:
+            if src_tz and src_tz != "UTC":
+                ts = ts.tz_localize(
+                    src_tz, nonexistent="shift_forward", ambiguous="NaT",
+                ).tz_convert("UTC")
+            else:
+                ts = ts.tz_localize("UTC")
+        except Exception:  # noqa: BLE001
+            return pd.NaT
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts
 
 
 def normalize_ts_to_utc(
     values,
+    lat=None,
+    lon=None,
+    *,
     src_tz: str | None = None,
 ) -> pd.Series:
     """Parse a timestamp column and return it as a **naive UTC** Series.
 
-    - Naive input values (no "Z" / no "+HH:MM" suffix) are localized to
-      ``src_tz`` first and then converted to UTC. The ``src_tz`` info
-      is stripped afterwards so the returned Series is tz-naive —
-      Phase 1 pages depend on naive timestamps and we preserve that
-      wire format while making the VALUES correct.
-    - tz-aware values (e.g. ISO strings ending in "Z") are converted to
-      UTC and likewise returned tz-naive.
-    - Unparseable values become ``NaT`` without raising.
+    Resolution order for the assumed source timezone of **naive**
+    input values:
 
-    ``src_tz`` defaults to :func:`_get_sheets_display_tz()`. When
-    ``src_tz`` is ``"UTC"`` (the legacy behavior) this is a no-op —
-    naive values are left alone exactly as before.
+    1. ``src_tz`` kwarg (explicit per-call override).
+    2. ``SHEETS_DISPLAY_TZ`` secret / env var (operator-set fixed zone).
+    3. Per-row GPS lookup using the ``lat`` / ``lon`` companion
+       series, if provided and ``timezonefinder`` is installed.
+    4. ``"UTC"`` — preserves prior behavior when GPS is unavailable.
+
+    tz-aware inputs are converted straight to UTC regardless of the
+    kwargs. The returned Series is tz-naive so Phase 1 consumers that
+    expect naive datetimes keep working unchanged — only the VALUES
+    shift.
     """
     if src_tz is None:
-        src_tz = _get_sheets_display_tz()
-    parsed = pd.to_datetime(values, errors="coerce", format="mixed")
-    if parsed.dt.tz is None:
-        # Already naive — legacy behavior was to leave it as-is and
-        # let downstream code assume it's UTC. Only shift the values
-        # when the operator has opted in to a non-UTC display zone.
-        if src_tz and src_tz != "UTC":
-            parsed = (
-                parsed.dt.tz_localize(
-                    src_tz, nonexistent="shift_forward", ambiguous="NaT",
+        src_tz = _get_sheets_display_tz_override()
+    s = pd.Series(values) if not isinstance(values, pd.Series) else values
+    parsed = pd.to_datetime(s, errors="coerce", format="mixed")
+
+    # Fast path: column-uniform src_tz (explicit kwarg or env override,
+    # or no GPS companion → default to legacy UTC behavior).
+    use_gps_path = (
+        src_tz is None
+        and lat is not None and lon is not None
+        and _tz_finder() is not None
+    )
+
+    if not use_gps_path:
+        effective_tz = src_tz or "UTC"
+        if parsed.dt.tz is None:
+            if effective_tz != "UTC":
+                parsed = (
+                    parsed.dt.tz_localize(
+                        effective_tz, nonexistent="shift_forward", ambiguous="NaT",
+                    )
+                    .dt.tz_convert("UTC")
+                    .dt.tz_localize(None)
                 )
-                .dt.tz_convert("UTC")
-                .dt.tz_localize(None)
-            )
-        return parsed
-    # tz-aware input → convert to UTC, then strip tz to keep the
-    # column naive for downstream Phase 1 consumers.
-    return parsed.dt.tz_convert("UTC").dt.tz_localize(None)
+            return parsed
+        return parsed.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    # GPS path: per-row TZ lookup. Any row whose GPS is missing /
+    # invalid falls back to UTC for that row only.
+    lat_s = pd.Series(lat).reset_index(drop=True) if not isinstance(lat, pd.Series) else lat.reset_index(drop=True)
+    lon_s = pd.Series(lon).reset_index(drop=True) if not isinstance(lon, pd.Series) else lon.reset_index(drop=True)
+    parsed = parsed.reset_index(drop=True)
+    out = []
+    for i, val in enumerate(s.reset_index(drop=True).tolist()):
+        row_tz = None
+        if i < len(lat_s) and i < len(lon_s):
+            row_tz = tz_for_gps(lat_s.iloc[i], lon_s.iloc[i])
+        ts = _localize_one(val, row_tz)
+        if pd.isna(ts):
+            out.append(pd.NaT)
+        else:
+            out.append(ts.tz_convert("UTC").tz_localize(None))
+    return pd.Series(out, index=s.index)
+
+
+# Backward-compat alias: older callers imported the "get" form before
+# the override split was introduced. Preserve their binding so nothing
+# at import time breaks.
+def _get_sheets_display_tz() -> str:
+    """Deprecated: prefer :func:`_get_sheets_display_tz_override`.
+
+    Returns the override if set, otherwise ``"UTC"`` to preserve the
+    legacy string-return contract.
+    """
+    return _get_sheets_display_tz_override() or "UTC"
 
 
 @st.cache_resource
@@ -268,7 +393,22 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
     if "Timestamp" in df.columns:
-        df["Timestamp"] = normalize_ts_to_utc(df["Timestamp"])
+        # Pair the Timestamp column with the decoded GPS columns so
+        # :func:`normalize_ts_to_utc` can resolve each row's source TZ
+        # from its own lat/lon — no sheet-wide hardcoded zone needed.
+        lat_series = None
+        lon_series = None
+        for cand in ("GPS Latitude", "Latitude", "Lat"):
+            if cand in df.columns:
+                lat_series = df[cand]
+                break
+        for cand in ("GPS Longitude", "Longitude", "Lon", "Lng"):
+            if cand in df.columns:
+                lon_series = df[cand]
+                break
+        df["Timestamp"] = normalize_ts_to_utc(
+            df["Timestamp"], lat=lat_series, lon=lon_series,
+        )
 
     return reorder_columns(df)
 
