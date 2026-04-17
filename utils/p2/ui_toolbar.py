@@ -192,7 +192,13 @@ def apply_device_time_filter(
     start_dt: datetime | None,
     end_dt: datetime | None,
 ) -> pd.DataFrame:
-    """Pure filter helper — no Streamlit calls, safe for unit tests."""
+    """Pure filter helper — no Streamlit calls, safe for unit tests.
+
+    Accepts a time column that is either tz-naive or tz-aware. Naive
+    user-picker bounds are aligned to the column's timezone before the
+    comparison so the filter works whether or not ``sheets_client``
+    has promoted the Timestamp column to tz-aware UTC.
+    """
     if df is None or df.empty:
         return df
     out = df
@@ -200,7 +206,21 @@ def apply_device_time_filter(
         out = out[out[dev_col].isin(list(selected_devices))]
     if time_col and time_col in out.columns and start_dt is not None and end_dt is not None:
         ts = pd.to_datetime(out[time_col], errors="coerce")
-        mask = (ts >= pd.Timestamp(start_dt)) & (ts <= pd.Timestamp(end_dt)) | ts.isna()
+        start_ts = pd.Timestamp(start_dt)
+        end_ts = pd.Timestamp(end_dt)
+        # Match tz-awareness between bounds and series so the comparison
+        # doesn't raise "Cannot compare tz-naive and tz-aware timestamps".
+        col_tz = getattr(ts.dt, "tz", None)
+        if col_tz is not None:
+            if start_ts.tz is None:
+                start_ts = start_ts.tz_localize("UTC")
+            else:
+                start_ts = start_ts.tz_convert("UTC")
+            if end_ts.tz is None:
+                end_ts = end_ts.tz_localize("UTC")
+            else:
+                end_ts = end_ts.tz_convert("UTC")
+        mask = (ts >= start_ts) & (ts <= end_ts) | ts.isna()
         out = out[mask]
     return out.copy()
 
