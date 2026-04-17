@@ -283,6 +283,9 @@ def build_enriched_group_figures(
     dev_col: str,
     *,
     y2_overrides: dict[str, list[str]] | None = None,
+    dual_axis_enabled: dict[str, bool] | None = None,
+    overlay_buoy_sst: bool = True,
+    overlay_air_temp: bool = False,
 ) -> list[tuple[str, object, str | None]]:
     """Return ``[(title, figure_or_None, skip_reason), …]``.
 
@@ -296,8 +299,21 @@ def build_enriched_group_figures(
     secondary (right-hand) axis. Any column not in the list stays on
     y1. If the group's series all share one unit this parameter is
     ignored and everything renders on a single axis.
+
+    ``dual_axis_enabled`` lets the caller flip individual mixed-unit
+    groups back to a single axis on demand — when ``False`` for a given
+    group key, every series in that group renders on y1 regardless of
+    the group's default axis tuple. Defaults to ``True`` for groups
+    that aren't explicitly mentioned, preserving the original layout.
+
+    ``overlay_buoy_sst`` and ``overlay_air_temp`` toggle the SST
+    products group's overlays. Buoy SST is on by default (it's the
+    point-truth users want anchored on the chart); air temp is off
+    because it lives on a different physical axis and is mainly useful
+    for inland deployments.
     """
     y2_overrides = y2_overrides or {}
+    dual_axis_enabled = dual_axis_enabled or {}
     out: list[tuple[str, object, str | None]] = []
     if df is None or df.empty or time_col not in df.columns:
         return out
@@ -312,14 +328,28 @@ def build_enriched_group_figures(
         reason = _empty_reason(base, cols)
 
         # SST product group: also check for a buoy-SST column to overlay.
-        if group.get("overlay_buoy_sst"):
+        # The overlay can be turned off by the caller; when it's on AND
+        # the products themselves have no data we still render the chart
+        # so the user can see the buoy-only series.
+        is_sst_group = bool(group.get("overlay_buoy_sst"))
+        wants_buoy_overlay = is_sst_group and overlay_buoy_sst
+        wants_air_overlay = is_sst_group and overlay_air_temp
+        if wants_buoy_overlay or wants_air_overlay:
             buoy_col = _find_col_by_keywords(
                 base, ("sst_buoy", "water temp", "ocean temp", "sst"),
             )
-            if reason is not None and buoy_col is None:
+            air_col = _find_col_by_keywords(
+                base, ("era5_airt",),
+            )
+            has_overlay_data = (
+                (wants_buoy_overlay and buoy_col is not None)
+                or (wants_air_overlay and air_col is not None)
+            )
+            if reason is not None and not has_overlay_data:
                 out.append((title, None, reason))
                 continue
-            reason = None  # we have at least buoy or at least one product
+            if has_overlay_data:
+                reason = None  # at least one of: buoy / air / a product
 
         if reason is not None:
             out.append((title, None, reason))
@@ -345,6 +375,13 @@ def build_enriched_group_figures(
         group_units = {s[2] for s in series_entries if len(s) >= 5}
         same_unit_group = len(group_units) <= 1
         override_cols = y2_overrides.get(group.get("key"))
+        # Per-group dual-axis toggle. Default ON for mixed-unit groups
+        # (preserves the original Wind / Atmosphere / Wave-period
+        # layouts). When the user flips the toggle off we collapse
+        # everything to y1 — same code path as same-unit groups.
+        group_key = group.get("key")
+        dual_on = dual_axis_enabled.get(group_key, True)
+        force_single_axis = same_unit_group or not dual_on
         axis_for: dict[str, str] = {}
         for entry in series_entries:
             if len(entry) == 5:
@@ -352,7 +389,7 @@ def build_enriched_group_figures(
             else:
                 col_, _lbl, _unit, _scale = entry  # type: ignore[misc]
                 default_axis = "y"
-            if same_unit_group:
+            if force_single_axis:
                 axis_for[col_] = "y"
             elif override_cols is not None:
                 axis_for[col_] = "y2" if col_ in override_cols else "y"
@@ -399,9 +436,14 @@ def build_enriched_group_figures(
                 ))
                 plotted_any = True
 
-        # SST products: overlay buoy SST as black dots on the primary
-        # axis so operators can visually anchor the comparison.
-        if group.get("overlay_buoy_sst"):
+        # SST products: overlay buoy SST (the point truth) on the
+        # primary axis so operators can visually anchor the comparison.
+        # We use larger markers + a thin connecting line + a white
+        # outline so the buoy stays the visually dominant trace even
+        # when 4–5 satellite product lines fight for attention. Color
+        # cycles per device so multi-buoy panels remain distinguishable.
+        _BUOY_PALETTE = ("#003E6B", "#1B5E20", "#4527A0", "#BF360C", "#37474F")
+        if is_sst_group and overlay_buoy_sst:
             buoy_col = _find_col_by_keywords(
                 base, ("sst_buoy", "water temp", "ocean temp", "sst"),
             )
@@ -414,17 +456,44 @@ def build_enriched_group_figures(
                     y = pd.to_numeric(base.loc[mask, buoy_col], errors="coerce")
                     if not y.notna().any():
                         continue
-                    name = f"Buoy — {device}" if device is not None and len(devices) > 1 else "Buoy"
+                    name = (
+                        f"Buoy — {device}"
+                        if device is not None and len(devices) > 1
+                        else "Buoy (point truth)"
+                    )
+                    color = _BUOY_PALETTE[di % len(_BUOY_PALETTE)]
                     fig.add_trace(go.Scatter(
                         x=base.loc[mask, time_col],
                         y=y,
-                        mode="markers",
+                        mode="lines+markers",
                         name=name,
+                        line=dict(width=1.8, color=color),
                         marker=dict(
-                            size=5,
-                            color="black",
+                            size=8,
+                            color=color,
                             symbol="circle",
+                            line=dict(width=1.0, color="white"),
                         ),
+                        yaxis="y",
+                    ))
+                    plotted_any = True
+
+        # SST products: optional ERA5 2 m air-temperature overlay,
+        # rendered as a low-emphasis dash-dot purple line so it provides
+        # context for inland deployments without competing with the
+        # satellite SST products or the buoy itself.
+        if is_sst_group and overlay_air_temp:
+            air_col = _find_col_by_keywords(base, ("era5_airt",))
+            if air_col is not None:
+                air = pd.to_numeric(base[air_col], errors="coerce") / 100.0
+                if air.notna().any():
+                    fig.add_trace(go.Scatter(
+                        x=base[time_col],
+                        y=air,
+                        mode="lines",
+                        name="Land / air temp (ERA5 2 m)",
+                        line=dict(width=1.4, color="#8E24AA", dash="dashdot"),
+                        opacity=0.75,
                         yaxis="y",
                     ))
                     plotted_any = True
@@ -433,9 +502,11 @@ def build_enriched_group_figures(
             out.append((title, None, "no plottable points in range"))
             continue
 
-        # When the group was auto-collapsed to a single axis the default
-        # y_label (e.g. "OISST (°C)") is misleading — use a generic
-        # "<quantity> (<unit>)" label instead.
+        # When the group was auto-collapsed to a single axis (same-unit
+        # series OR user-disabled dual-axis toggle) the default y_label
+        # (e.g. "OISST (°C)") is misleading — use a generic
+        # "<quantity> (<unit>)" label, or fall back to the group label
+        # when the units are mixed but the user collapsed everything.
         _unit_str = next(iter(group_units)) if same_unit_group and group_units else None
         y_title_final = group["y_label"]
         if same_unit_group and _unit_str:
@@ -449,6 +520,8 @@ def build_enriched_group_figures(
                 "%": "Percent",
             }.get(_unit_str, group["y_label"])
             y_title_final = f"{_quantity} ({_unit_str})"
+        elif force_single_axis and not same_unit_group:
+            y_title_final = "Mixed units — see legend (single-axis mode)"
 
         apply_plot_style(
             fig,

@@ -235,19 +235,19 @@ with tab_overview:
             unsafe_allow_html=True,
         )
 
-        # Per-group 2nd-axis selector. Groups whose series all share a
-        # unit (SST products in °C, etc.) skip this UI automatically —
-        # they render on a single axis in the builder. For the rest we
-        # expose a multiselect so the user can re-route variables to y2
-        # if the default isn't ideal for their analysis.
-        _y2_overrides: dict[str, list[str]] = {}
+        # Per-group controls — surfaced as three compact columns so the
+        # user can flip dual-axis on/off, pick which series lands on y2
+        # and (for the SST product group only) toggle the buoy / air
+        # overlays without opening a nested expander.
         _dual_groups = getattr(sensor_overview, "list_dual_axis_groups", lambda: [])()
+        _y2_overrides: dict[str, list[str]] = {}
+        _dual_enabled: dict[str, bool] = {}
         if _dual_groups:
-            with st.expander("⚙️  Dual y-axis configuration (advanced)"):
+            with st.expander("⚙️  Dual y-axis configuration", expanded=False):
                 st.caption(
-                    "Pick which variable(s) each group should plot on the "
-                    "right-hand y-axis. Leave as default to use the chart's "
-                    "built-in recommendation."
+                    "Per-group dual-axis toggle. Disable to collapse both "
+                    "series onto a single y-axis; enable to pick which "
+                    "variable(s) plot on the RIGHT-hand axis."
                 )
                 for _g in _dual_groups:
                     _key = _g.get("key")
@@ -255,18 +255,57 @@ with tab_overview:
                     _label_by_col = {s[0]: f"{s[1]} — {s[0]}" for s in _g["series"]}
                     _default_y2 = [s[0] for s in _g["series"]
                                    if (len(s) >= 5 and s[4] == "y2")]
-                    _sel = st.multiselect(
-                        _g["title"],
-                        options=_opts,
-                        default=_default_y2,
-                        format_func=lambda c, m=_label_by_col: m.get(c, c),
-                        key=f"p8_y2_override_{_key}",
-                        help="Selected columns plot on the RIGHT-hand y-axis; unselected on the left.",
-                    )
+                    c_tog, c_sel = st.columns([1, 3])
+                    with c_tog:
+                        _on = st.toggle(
+                            "Dual Y",
+                            value=True,
+                            key=f"p8_dual_axis_{_key}",
+                            help=f"Toggle the right-hand axis for '{_g['title']}'.",
+                        )
+                    with c_sel:
+                        _sel = st.multiselect(
+                            _g["title"],
+                            options=_opts,
+                            default=_default_y2,
+                            format_func=lambda c, m=_label_by_col: m.get(c, c),
+                            key=f"p8_y2_override_{_key}",
+                            disabled=not _on,
+                            help="Columns to plot on the RIGHT-hand y-axis when dual mode is on.",
+                        )
+                    _dual_enabled[_key] = bool(_on)
                     _y2_overrides[_key] = _sel
 
+        c_buoy, c_air, _spacer = st.columns([1, 1, 2])
+        with c_buoy:
+            _overlay_buoy = st.toggle(
+                "Overlay buoy SST",
+                value=True,
+                key="p8_overlay_buoy",
+                help=(
+                    "Render the buoy external SST sensor as a highlighted "
+                    "trace on the SST-products chart so you can anchor the "
+                    "satellite / reanalysis products against the point truth."
+                ),
+            )
+        with c_air:
+            _overlay_air = st.toggle(
+                "Overlay land / air temp",
+                value=False,
+                key="p8_overlay_air",
+                help=(
+                    "Overlay ERA5 2 m air temperature on the SST-products "
+                    "chart. Useful for inland / coastal deployments where "
+                    "the satellite SST products are land-masked."
+                ),
+            )
+
         enriched_results = sensor_overview.build_enriched_group_figures(
-            df, time_col, dev_col, y2_overrides=_y2_overrides,
+            df, time_col, dev_col,
+            y2_overrides=_y2_overrides,
+            dual_axis_enabled=_dual_enabled,
+            overlay_buoy_sst=_overlay_buoy,
+            overlay_air_temp=_overlay_air,
         )
         if not enriched_results:
             st.caption("No enriched columns available — run the enrichment workflows.")
@@ -367,6 +406,50 @@ with tab_b1:
             ),
             use_container_width=True,
         )
+
+        # Hull vs ERA5-air diagnostic — only render when both overlays
+        # are toggled on, so the user actively asked to compare them.
+        # Surfaces correlation + sample count so timezone / unit bugs
+        # are flagged numerically instead of having to be eyeballed.
+        if show_internal and show_land_air:
+            _diag_fn = getattr(panels, "build_internal_vs_air_diagnostic", None)
+            if _diag_fn is not None:
+                _diag = _diag_fn(df)
+                _stats = _diag.get("stats", {}) or {}
+                st.markdown(f"*{_DESC.get('internal_vs_air_diag', '')}*")
+                st.plotly_chart(_diag["fig"], use_container_width=True)
+                _n = int(_stats.get("n", 0) or 0)
+                _corr = _stats.get("correlation", float("nan"))
+                _delta = _stats.get("mean_delta", float("nan"))
+                _hours = _stats.get("ts_overlap_hours", float("nan"))
+                if _n > 0 and pd.notna(_corr):
+                    if _corr < 0:
+                        st.error(
+                            f"⚠️  Hull and air temperatures are NEGATIVELY "
+                            f"correlated (r = {_corr:+.3f}, N = {_n}, "
+                            f"Δ_mean = {_delta:+.2f} °C, span = {_hours:.0f} h). "
+                            "Inspect timestamp alignment, units, and the "
+                            "decoder for the Internal Temp field."
+                        )
+                    elif _corr < 0.2:
+                        st.warning(
+                            f"Weak hull–air correlation (r = {_corr:+.3f}, "
+                            f"N = {_n}). Trends may be obscured by hull "
+                            "greenhouse warming or sample sparsity."
+                        )
+                    else:
+                        st.success(
+                            f"Hull and air temperatures are positively "
+                            f"correlated (r = {_corr:+.3f}, N = {_n}, "
+                            f"Δ_mean = {_delta:+.2f} °C). Streams are "
+                            "aligned in time and units."
+                        )
+                else:
+                    st.info(
+                        "Diagnostic produced no overlapping samples — at "
+                        "least one of the two streams is empty for the "
+                        "current selection."
+                    )
 
         st.markdown(f"*{_DESC.get('residual_hist', '')}*")
         st.plotly_chart(panels.build_residual_histogram(df), use_container_width=True)

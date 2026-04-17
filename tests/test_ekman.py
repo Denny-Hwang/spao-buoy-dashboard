@@ -76,6 +76,32 @@ def test_compute_drift_velocity_from_gps():
     assert abs(out["u_drift"].iloc[1]) < 1.0
 
 
+def test_compute_drift_velocity_treats_zero_zero_as_no_fix():
+    """A row with Lat=0, Lon=0 is a detection-failure sentinel — using
+    it as a real position would create artificial drift velocities of
+    several thousand m/s. Make sure the velocity around it is NaN
+    rather than physically implausible."""
+    df = pd.DataFrame({
+        "Timestamp": pd.to_datetime([
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            "2025-01-01T02:00:00Z",
+            "2025-01-01T03:00:00Z",
+        ]),
+        "Lat": [58.0, 0.0, 58.001, 58.002],
+        "Lon": [-170.0, 0.0, -170.001, -170.002],
+    })
+    out = compute_drift_velocity(df)
+    # The transition INTO the bad fix and OUT of it must not produce
+    # finite velocities — those would be ~10 km/s artifacts.
+    assert np.isnan(out["u_drift"].iloc[1])
+    assert np.isnan(out["v_drift"].iloc[1])
+    assert np.isnan(out["u_drift"].iloc[2])
+    assert np.isnan(out["v_drift"].iloc[2])
+    # The good-to-good step at the end must still yield a real velocity.
+    assert np.isfinite(out["u_drift"].iloc[3]) or np.isfinite(out["v_drift"].iloc[3])
+
+
 def test_decompose_drift_pipeline():
     n = 50
     wind = _wind_series(n, speed=8.0, seed=3)
