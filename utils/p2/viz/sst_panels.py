@@ -41,6 +41,12 @@ BUOY_INTERNAL_TEMP_ALIASES = (
     "Internal Temp", "Internal_Temp", "InternalTemp",
     "Int Temp", "Int_Temp", "internal_temp",
 )
+# Land / coastal context references. ``ERA5_AIRT_cC`` is 2m air
+# temperature from the Open-Meteo Archive (ERA5) fetcher; it is
+# populated EVERYWHERE including inland deployments (Richland, WA) so
+# we use it as the "what the weather station would report" reference
+# when satellite SST products are masked. Stored in hundredths of °C.
+LAND_AIR_TEMP_ALIASES = ("ERA5_AIRT_cC", "ERA5_AIRT")
 
 
 # One-line descriptions used by the Streamlit page to explain each plot
@@ -182,6 +188,24 @@ def extract_buoy_internal_temp(df: pd.DataFrame) -> pd.Series | None:
     return pd.to_numeric(df[col], errors="coerce")
 
 
+def extract_land_air_temp(df: pd.DataFrame) -> pd.Series | None:
+    """Return ERA5 2m air temperature (°C) when present.
+
+    Useful as a reference overlay on inland / coastal buoys where the
+    satellite SST products are land-masked — air temp at the buoy's
+    location is often the best "weather-station-grade" reference.
+    The underlying column is stored in hundredths of °C, so we divide
+    by 100 when the suffix matches.
+    """
+    col = _column_or_none(df, LAND_AIR_TEMP_ALIASES)
+    if col is None:
+        return None
+    s = pd.to_numeric(df[col], errors="coerce")
+    if col.endswith("_cC"):
+        s = s / 100.0
+    return s
+
+
 # ──────────────────────────────────────────────────────────────────────
 # B1 — Intercomparison
 # ──────────────────────────────────────────────────────────────────────
@@ -231,6 +255,7 @@ def build_sst_timeseries(
     ts_col: str | None = None,
     *,
     include_internal_temp: bool = False,
+    include_land_air_temp: bool = False,
 ) -> Any:
     """Buoy SST (per device) vs satellite/reanalysis products over time.
 
@@ -310,6 +335,20 @@ def build_sst_timeseries(
                 name="Buoy internal temp (hull)",
                 line=dict(width=1.5, color="#888888", dash="dot"),
                 opacity=0.85,
+            ))
+
+    # Optional overlay: ERA5 2m air temperature at the buoy location.
+    # Essential reference for inland / coastal deployments where all
+    # satellite SST products are masked — the user still sees *some*
+    # land-weather curve to interpret the buoy SST against.
+    if include_land_air_temp:
+        airt = extract_land_air_temp(df)
+        if airt is not None and airt.notna().any():
+            fig.add_trace(go.Scatter(
+                x=ts, y=airt, mode="lines",
+                name="Land / air temp (ERA5 2 m)",
+                line=dict(width=1.6, color="#8E24AA", dash="dashdot"),
+                opacity=0.9,
             ))
 
     if apply_plot_style is not None:
@@ -523,6 +562,7 @@ def build_diurnal_composite(
     ref: str = "OISST",
     *,
     include_internal_temp: bool = False,
+    include_land_air_temp: bool = False,
 ) -> Any:
     _require_plotly()
     buoy = extract_buoy_sst(df)
@@ -537,6 +577,10 @@ def build_diurnal_composite(
         itemp = extract_buoy_internal_temp(df)
         if itemp is not None:
             frame["itemp"] = itemp.reindex(frame.index)
+    if include_land_air_temp:
+        airt = extract_land_air_temp(df)
+        if airt is not None:
+            frame["airt"] = airt.reindex(frame.index)
     if frame.empty:
         return go.Figure().update_layout(title="Diurnal composite — no data")
     frame["hour"] = frame["ts"].dt.hour
@@ -557,6 +601,16 @@ def build_diurnal_composite(
                 mode="lines+markers",
                 name="buoy internal temp (hour-of-day mean)",
                 line=dict(color="#888888", width=2, dash="dot"),
+                marker=dict(size=6),
+            ))
+    if "airt" in frame.columns:
+        airt_mean = frame.groupby("hour")["airt"].mean()
+        if airt_mean.notna().any():
+            fig.add_trace(go.Scatter(
+                x=airt_mean.index, y=airt_mean.values,
+                mode="lines+markers",
+                name="land / air temp (ERA5 2 m, hour-of-day mean)",
+                line=dict(color="#8E24AA", width=2, dash="dashdot"),
                 marker=dict(size=6),
             ))
     if "ref" in frame.columns:
@@ -630,11 +684,13 @@ __all__ = [
     "PRODUCT_ALIASES",
     "BUOY_SST_ALIASES",
     "BUOY_INTERNAL_TEMP_ALIASES",
+    "LAND_AIR_TEMP_ALIASES",
     "DESCRIPTIONS",
     "PRODUCT_INFO",
     "extract_products",
     "extract_buoy_sst",
     "extract_buoy_internal_temp",
+    "extract_land_air_temp",
     "build_metrics_table",
     "build_sst_timeseries",
     "build_residual_histogram",
