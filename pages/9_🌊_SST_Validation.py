@@ -495,14 +495,61 @@ with tab_b1:
                 _corr = _stats.get("correlation", float("nan"))
                 _delta = _stats.get("mean_delta", float("nan"))
                 _hours = _stats.get("ts_overlap_hours", float("nan"))
+                _peak_i = _stats.get("peak_hour_internal", float("nan"))
+                _peak_a = _stats.get("peak_hour_air", float("nan"))
+                _phase = _stats.get("phase_shift_hours", float("nan"))
+
+                # Phase-shift readout — a ≥ 6 h offset between the two
+                # hour-of-day peaks is physically unexplainable (both
+                # should track local solar forcing) and the single
+                # strongest signal for a timezone bug. Surface it
+                # prominently next to the correlation readout.
+                if pd.notna(_phase):
+                    if abs(_phase) >= 6:
+                        st.error(
+                            f"🕒 **Phase shift ≈ {_phase:+.1f} h** — hull "
+                            f"peaks at {_peak_i:.0f} UTC vs air at "
+                            f"{_peak_a:.0f} UTC. A phase offset this "
+                            "large between two thermal series driven by "
+                            "the same solar cycle points at a **timezone / "
+                            "row-alignment bug** in one of the streams. "
+                            "Check: (a) `Timestamp` column is actually "
+                            "UTC in Sheets; (b) Open-Meteo fetcher is "
+                            "called with `timezone=UTC`; (c) the "
+                            "`ERA5_AIRT_cC` value on each row was "
+                            "fetched at THAT row's (lat, lon, hour) — "
+                            "use the GPS panel on the Sensor Overview "
+                            "tab to verify."
+                        )
+                    elif abs(_phase) >= 3:
+                        st.warning(
+                            f"🕒 Phase shift ≈ {_phase:+.1f} h (hull peak "
+                            f"{_peak_i:.0f} UTC, air peak {_peak_a:.0f} "
+                            "UTC). A few-hour lag is expected from hull "
+                            "thermal inertia, but > 3 h warrants a look "
+                            "at timezone / sample alignment."
+                        )
+                    else:
+                        st.caption(
+                            f"🕒 Phase shift ≈ {_phase:+.1f} h "
+                            f"(hull peak {_peak_i:.0f} UTC, air peak "
+                            f"{_peak_a:.0f} UTC) — within expected "
+                            "thermal-lag range."
+                        )
+
                 if _n > 0 and pd.notna(_corr):
                     if _corr < 0:
                         st.error(
                             f"⚠️  Hull and air temperatures are NEGATIVELY "
                             f"correlated (r = {_corr:+.3f}, N = {_n}, "
                             f"Δ_mean = {_delta:+.2f} °C, span = {_hours:.0f} h). "
-                            "Inspect timestamp alignment, units, and the "
-                            "decoder for the Internal Temp field."
+                            "Likely causes: (1) `Timestamp` column is "
+                            "stored in local timezone but read as UTC "
+                            "(check Apps Script `new Date().toISOString()` "
+                            "vs the spreadsheet's own Display Time Zone), "
+                            "(2) ERA5 row-alignment is off by ~12 h, "
+                            "or (3) Internal Temp decoder is reading "
+                            "wrong bytes."
                         )
                     elif _corr < 0.2:
                         st.warning(
@@ -523,9 +570,6 @@ with tab_b1:
                         "least one of the two streams is empty for the "
                         "current selection."
                     )
-
-        st.markdown(f"*{_DESC.get('residual_hist', '')}*")
-        st.plotly_chart(panels.build_residual_histogram(df), use_container_width=True)
 
 with tab_b2:
     st.subheader("B2 — Drift Detection")
@@ -551,8 +595,28 @@ with tab_b2:
 
         st.markdown(f"*{_DESC.get('drift_box', '')}*")
         st.plotly_chart(panels.build_drift_boxplot(df), use_container_width=True)
-        st.markdown(f"*{_DESC.get('cusum', '')}*")
-        st.plotly_chart(panels.build_cusum_chart(df), use_container_width=True)
+
+        # CUSUM is a change-point statistic — its visual interpretation
+        # is fragile on short windows because the cumulative sum will
+        # always drift on any non-zero residual. Only render when we
+        # have ≥ 30 days of data so the chart is actually meaningful.
+        _ts_series = pd.to_datetime(
+            df.get("Timestamp", pd.Series(index=df.index)),
+            errors="coerce", utc=True,
+        ).dropna()
+        _span_days = (
+            (_ts_series.max() - _ts_series.min()).total_seconds() / 86400.0
+            if len(_ts_series) > 1 else 0.0
+        )
+        if _span_days >= 30:
+            st.markdown(f"*{_DESC.get('cusum', '')}*")
+            st.plotly_chart(panels.build_cusum_chart(df), use_container_width=True)
+        else:
+            st.caption(
+                f"CUSUM change-point chart hidden — requires ≥ 30 days of data "
+                f"(current span: {_span_days:.1f} days). The Theil-Sen drift "
+                "slope above already captures the relevant signal on short windows."
+            )
 
 with tab_b3:
     st.subheader("B3 — Diurnal Warming")
@@ -632,25 +696,46 @@ def _load_derived_daily() -> pd.DataFrame:
 with tab_long:
     st.subheader("30-day bias trend (Derived_Daily)")
     daily_df = _load_derived_daily()
-    if daily_df.empty:
-        st.info(
-            "Derived_Daily worksheet not yet populated. "
-            "Run the `derived_daily` GitHub Action (or "
-            "`python scripts/compute_daily_derived.py`) to generate the "
-            "daily-aggregation table, then reload this page."
-        )
-    else:
+    # A 30-day trend is only meaningful once Derived_Daily has
+    # accumulated a reasonable number of aggregated days. Below that
+    # threshold the chart looks almost empty and only adds noise — tuck
+    # the sparse view behind an expander so operators aren't distracted
+    # by a near-empty panel on a fresh deployment.
+    _MIN_DAILY_ROWS_FOR_EXPAND = 7
+    _sparse = daily_df.empty or len(daily_df) < _MIN_DAILY_ROWS_FOR_EXPAND
+
+    def _render_long_term_body(frame: pd.DataFrame) -> None:
+        if frame.empty:
+            st.info(
+                "Derived_Daily worksheet not yet populated. "
+                "Run the `derived_daily` GitHub Action (or "
+                "`python scripts/compute_daily_derived.py`) to generate the "
+                "daily-aggregation table, then reload this page."
+            )
+            return
         try:
             trend_panels = importlib.import_module("utils.p2.viz.trend_panels")
             st.plotly_chart(
-                trend_panels.build_sst_bias_trend(daily_df, window_days=30),
+                trend_panels.build_sst_bias_trend(frame, window_days=30),
                 use_container_width=True,
             )
-            latest = daily_df.tail(7)
+            latest = frame.tail(7)
             if not latest.empty:
                 st.caption("Last 7 rows from Derived_Daily")
                 st.dataframe(latest, use_container_width=True)
         except Exception as exc:  # noqa: BLE001
             st.caption(f"Bias trend rendering failed: {exc}")
+
+    if _sparse:
+        _label = (
+            f"Long-term bias trend — only "
+            f"{len(daily_df)} day{'s' if len(daily_df) != 1 else ''} "
+            f"of Derived_Daily accumulated (need ≥ {_MIN_DAILY_ROWS_FOR_EXPAND} "
+            "for a useful 30-day window). Expand to view."
+        )
+        with st.expander(_label, expanded=False):
+            _render_long_term_body(daily_df)
+    else:
+        _render_long_term_body(daily_df)
 
 render_footer()

@@ -150,6 +150,54 @@ def test_b3_diurnal_panels():
     assert sst_panels.build_amplitude_vs_wind(df) is not None
 
 
+def test_internal_vs_air_diagnostic_detects_phase_shift():
+    """Two identical diurnal cycles offset by 12 h must come back with
+    ``phase_shift_hours`` close to ±12 so the page can flag a timezone
+    bug. Negative correlation is a consequence of the 12-h shift."""
+    from utils.p2.viz import sst_panels
+
+    n = 72
+    ts = pd.date_range("2025-06-01", periods=n, freq="h", tz="UTC")
+    hours = np.arange(n) % 24
+    # internal: peak at hour 14 UTC; air: peak at hour 02 UTC → 12h shift.
+    internal = 15.0 + 10.0 * np.cos((hours - 14) / 24.0 * 2 * np.pi)
+    air = 15.0 + 10.0 * np.cos((hours - 2) / 24.0 * 2 * np.pi)
+    df = pd.DataFrame({
+        "Timestamp": ts,
+        "Internal Temp": internal,
+        "ERA5_AIRT_cC": (air * 100).round().astype(int),
+    })
+    out = sst_panels.build_internal_vs_air_diagnostic(df)
+    stats = out["stats"]
+    assert stats["n"] == n
+    assert stats["correlation"] < -0.9, stats
+    assert abs(abs(stats["phase_shift_hours"]) - 12.0) <= 1.0, stats
+    assert 0 <= stats["peak_hour_air"] <= 23
+    assert 0 <= stats["peak_hour_internal"] <= 23
+
+
+def test_internal_vs_air_diagnostic_in_phase_series():
+    """When the two streams peak within a thermal-lag-reasonable window
+    the phase shift stays small and correlation is strongly positive."""
+    from utils.p2.viz import sst_panels
+
+    n = 72
+    ts = pd.date_range("2025-06-01", periods=n, freq="h", tz="UTC")
+    hours = np.arange(n) % 24
+    air = 15.0 + 8.0 * np.cos((hours - 15) / 24.0 * 2 * np.pi)
+    # Hull lags air by 2 h (typical thermal inertia).
+    internal = 18.0 + 12.0 * np.cos((hours - 17) / 24.0 * 2 * np.pi)
+    df = pd.DataFrame({
+        "Timestamp": ts,
+        "Internal Temp": internal,
+        "ERA5_AIRT_cC": (air * 100).round().astype(int),
+    })
+    out = sst_panels.build_internal_vs_air_diagnostic(df)
+    stats = out["stats"]
+    assert stats["correlation"] > 0.8
+    assert abs(stats["phase_shift_hours"]) <= 3.0, stats
+
+
 def test_page_sst_importable_under_stub():
     page = PAGES_DIR / "9_🌊_SST_Validation.py"
     assert page.exists()

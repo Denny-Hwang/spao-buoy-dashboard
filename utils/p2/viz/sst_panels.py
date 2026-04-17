@@ -413,15 +413,22 @@ def build_internal_vs_air_diagnostic(
     opposite directions (negative correlation).
 
     The accompanying stats dict reports sample count, mean/std of each
-    series, mean delta, the Pearson correlation, and whether the time
-    bases line up — useful for flagging timezone or sample-alignment
-    bugs that pure visual inspection might miss.
+    series, mean delta, the Pearson correlation, AND a phase-offset
+    analysis (``peak_hour_internal`` / ``peak_hour_air`` / ``phase_shift_hours``)
+    derived from the hour-of-day composite. A phase shift close to
+    ±12 h is the unmistakable signature of a timezone-interpretation
+    bug in one of the two streams; anything above ~4 h is suspicious
+    for a real environment where both series should peak at local
+    afternoon.
     """
     _require_plotly()
     out: dict = {"stats": {
         "n": 0, "mean_internal": float("nan"), "mean_air": float("nan"),
         "mean_delta": float("nan"), "correlation": float("nan"),
         "ts_overlap_hours": float("nan"),
+        "peak_hour_internal": float("nan"),
+        "peak_hour_air": float("nan"),
+        "phase_shift_hours": float("nan"),
     }}
     resolved_ts = _resolve_ts_col(df, ts_col)
     itemp = extract_buoy_internal_temp(df)
@@ -489,6 +496,29 @@ def build_internal_vs_air_diagnostic(
         (frame["ts"].max() - frame["ts"].min()).total_seconds() / 3600.0
         if len(frame) > 1 else 0.0
     )
+
+    # Hour-of-day composite → peak-hour detection. This surfaces a
+    # timezone bug: if one series peaks at 14 UTC and the other at 02
+    # UTC the phase offset is 12 h, which cannot be explained by any
+    # real thermal process and points at mis-interpreted timezone or
+    # mis-aligned row-to-row lookup in the cron enrichment.
+    peak_internal = float("nan")
+    peak_air = float("nan")
+    phase_shift = float("nan")
+    if overlap_hours >= 24 and len(frame) >= 12:
+        hod = frame.copy()
+        hod["hour"] = hod["ts"].dt.hour
+        by_hour_internal = hod.groupby("hour")["internal"].mean()
+        by_hour_air = hod.groupby("hour")["air"].mean()
+        if by_hour_internal.notna().any():
+            peak_internal = float(by_hour_internal.idxmax())
+        if by_hour_air.notna().any():
+            peak_air = float(by_hour_air.idxmax())
+        if np.isfinite(peak_internal) and np.isfinite(peak_air):
+            raw = peak_internal - peak_air
+            # Wrap to [-12, +12] so "22h vs 02h" comes back as +4, not -20.
+            phase_shift = ((raw + 12.0) % 24.0) - 12.0
+
     out["fig"] = fig
     out["stats"] = {
         "n": int(len(frame)),
@@ -497,6 +527,9 @@ def build_internal_vs_air_diagnostic(
         "mean_delta": float(frame["delta"].mean()),
         "correlation": corr,
         "ts_overlap_hours": float(overlap_hours),
+        "peak_hour_internal": peak_internal,
+        "peak_hour_air": peak_air,
+        "phase_shift_hours": phase_shift,
     }
     return out
 
