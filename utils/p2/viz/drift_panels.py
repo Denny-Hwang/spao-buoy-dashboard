@@ -31,6 +31,7 @@ from ..physics.ekman import (
     fit_windage,
     _resolve_lat_col,
     _resolve_lon_col,
+    _is_missing_gps,
 )
 from ..physics.storms import detect_storms, superposed_epoch
 
@@ -124,7 +125,10 @@ def build_trajectory_speed_colored(
     lat = pd.to_numeric(drift.get(lat_col), errors="coerce")
     lon = pd.to_numeric(drift.get(lon_col), errors="coerce")
     speed = np.sqrt(drift["u_drift"] ** 2 + drift["v_drift"] ** 2)
-    mask = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(speed)
+    # Exclude (0, 0) fixes — those are detection-failure sentinels, not
+    # a real position in the Gulf of Guinea.
+    no_fix = _is_missing_gps(lat.to_numpy(dtype=float), lon.to_numpy(dtype=float))
+    mask = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(speed) & ~no_fix
     lat_v = lat[mask].to_numpy()
     lon_v = lon[mask].to_numpy()
     spd_v = speed[mask].to_numpy()

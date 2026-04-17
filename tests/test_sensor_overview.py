@@ -261,3 +261,67 @@ def test_single_series_group_has_no_secondary_axis() -> None:
     # And all traces land on the primary axis.
     for t in fig.data:
         assert (t.yaxis or "y") == "y"
+
+
+# ---------- Per-group dual-axis toggle ------------------------------
+
+def test_dual_axis_disabled_collapses_wind_to_single_axis() -> None:
+    """Passing ``dual_axis_enabled={'wind': False}`` must collapse the
+    Wind group's two series back onto y1 — the same code path as
+    same-unit groups — even though the group's defaults split them."""
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        dual_axis_enabled={"wind": False},
+    )
+    fig = _fig_for_group_key(results, "Wind")
+    assert fig is not None
+    # Every trace should be on y1.
+    for t in fig.data:
+        assert (t.yaxis or "y") == "y"
+
+
+def test_dual_axis_enabled_keeps_default_split() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        dual_axis_enabled={"wind": True},
+    )
+    fig = _fig_for_group_key(results, "Wind")
+    assert fig is not None
+    dir_traces = [t for t in fig.data if "direction" in str(t.name).lower()]
+    assert dir_traces and all(t.yaxis == "y2" for t in dir_traces)
+
+
+# ---------- Buoy / air overlay toggles ------------------------------
+
+def test_overlay_buoy_default_renders_buoy_trace_on_sst_group() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert any("Buoy" in str(t.name) for t in fig.data)
+
+
+def test_overlay_buoy_disabled_drops_buoy_trace() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        overlay_buoy_sst=False,
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert not any("Buoy" in str(t.name) for t in fig.data)
+
+
+def test_overlay_air_temp_adds_era5_trace_to_sst_group() -> None:
+    df = _make_frame()
+    results = sensor_overview.build_enriched_group_figures(
+        df, "Timestamp", "Device Tab",
+        overlay_air_temp=True,
+    )
+    fig = _fig_for_group_key(results, "Sea surface temperature")
+    assert fig is not None
+    assert any("Land / air temp" in str(t.name) for t in fig.data)

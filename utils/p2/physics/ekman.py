@@ -98,13 +98,23 @@ def _latlon_to_xy(lat: np.ndarray, lon: np.ndarray) -> tuple[np.ndarray, np.ndar
     return x, y
 
 
+def _is_missing_gps(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Mark (0, 0) fixes as missing — that's a "no-fix" sentinel, not a
+    point in the Gulf of Guinea. Detection-failed rows would otherwise
+    produce huge artificial drift velocities and pollute every panel
+    derived from the trajectory.
+    """
+    return (np.abs(lat) < 1e-9) & (np.abs(lon) < 1e-9)
+
+
 def compute_drift_velocity(df: pd.DataFrame) -> pd.DataFrame:
     """Finite-difference the buoy's GPS track to ``(u_drift, v_drift)`` m/s.
 
     Adds (or overwrites) ``u_drift`` and ``v_drift`` columns and returns
     the augmented DataFrame. Requires Lat, Lon and a timestamp column
     under any of the recognized aliases. Rows with missing coordinates
-    or non-positive dt produce NaN velocities.
+    or non-positive dt produce NaN velocities. ``(0, 0)`` lat/lon pairs
+    are treated as no-fix sentinels and excluded from differencing.
     """
     out = df.copy()
     lat_col = _resolve_lat_col(out)
@@ -118,6 +128,9 @@ def compute_drift_velocity(df: pd.DataFrame) -> pd.DataFrame:
 
     lat = pd.to_numeric(out[lat_col], errors="coerce").to_numpy(dtype=float)
     lon = pd.to_numeric(out[lon_col], errors="coerce").to_numpy(dtype=float)
+    no_fix = _is_missing_gps(lat, lon)
+    lat = np.where(no_fix, np.nan, lat)
+    lon = np.where(no_fix, np.nan, lon)
     ts = pd.to_datetime(out[ts_col], utc=True, errors="coerce")
     x, y = _latlon_to_xy(lat, lon)
 
@@ -243,4 +256,5 @@ __all__ = [
     "compute_drift_velocity",
     "fit_windage",
     "decompose_drift",
+    "_is_missing_gps",
 ]

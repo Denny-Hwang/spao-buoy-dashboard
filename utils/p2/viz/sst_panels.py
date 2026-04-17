@@ -99,6 +99,13 @@ DESCRIPTIONS: dict[str, str] = {
         "Daily diurnal-amplitude (max − min) vs daily-mean wind speed, "
         "overlaid with Kawai & Wada (2007) empirical envelope A = 2.5·U⁻¹."
     ),
+    "internal_vs_air_diag": (
+        "Diagnostic: hull internal temperature vs ERA5 2 m air "
+        "temperature on the same time axis, with their difference "
+        "Δ = internal − air on the right axis. They should be positively "
+        "correlated; a near-zero / negative correlation flags a unit, "
+        "scale, or timezone problem in one of the streams."
+    ),
 }
 
 
@@ -228,6 +235,20 @@ _PRODUCT_COLORS: dict[str, str] = {
 }
 
 
+# Buoy is the point-truth in every panel — give it a dedicated palette
+# that does not collide with any satellite product so the eye finds it
+# first. PNNL deep blue (single device) and a contrasting set when
+# multiple devices co-exist on one chart.
+_BUOY_PRIMARY_COLOR = "#003E6B"
+_BUOY_DEVICE_COLORS: tuple[str, ...] = (
+    "#003E6B",  # PNNL deep blue
+    "#1B5E20",  # Forest green
+    "#4527A0",  # Indigo
+    "#BF360C",  # Burnt orange
+    "#37474F",  # Dark slate
+)
+
+
 def _resolve_ts_col(df: pd.DataFrame, ts_col: str | None) -> str | None:
     """Return the best timestamp column name present in ``df``."""
     if ts_col and ts_col in df.columns:
@@ -263,16 +284,18 @@ def build_sst_timeseries(
     None, so pages that don't ship a literal ``Timestamp`` column still
     render correctly. When the frame has multiple devices the buoy
     points are colored per device so overlapping deployments stay
-    distinguishable.
+    distinguishable. The buoy track is rendered as connected
+    larger-than-default markers in PNNL blue with a white outline so it
+    pops above the satellite/reanalysis reference lines and the optional
+    internal/air overlays.
     """
     _require_plotly()
     fig = go.Figure()
 
     # Lazy import so this module stays usable under the Streamlit stub.
     try:
-        from utils.plot_utils import COLORS, apply_plot_style
+        from utils.plot_utils import apply_plot_style
     except Exception:  # pragma: no cover
-        COLORS = ["#003E6B"]
         apply_plot_style = None  # type: ignore[assignment]
 
     resolved_ts = _resolve_ts_col(df, ts_col)
@@ -288,6 +311,10 @@ def build_sst_timeseries(
     dev_col = _resolve_dev_col(df)
 
     # Buoy points — one series per device when device info is present.
+    # The buoy is the truth source for B1/B2/B3 stats so we render it
+    # as the visually dominant trace: larger markers, a thin connecting
+    # line, an outline for contrast against satellite curves and the
+    # PNNL blue palette so it stays distinct from any reference colour.
     if buoy is not None:
         if dev_col is not None:
             devices = list(pd.Series(df[dev_col]).dropna().unique())
@@ -297,21 +324,28 @@ def build_sst_timeseries(
                 xb = ts.loc[mask]
                 if not yb.notna().any():
                     continue
+                color = _BUOY_DEVICE_COLORS[di % len(_BUOY_DEVICE_COLORS)]
                 fig.add_trace(go.Scatter(
                     x=xb, y=yb,
-                    mode="markers",
+                    mode="lines+markers",
                     name=f"Buoy — {device}",
+                    line=dict(width=1.5, color=color),
                     marker=dict(
-                        size=5,
-                        color=COLORS[di % len(COLORS)],
+                        size=8,
+                        color=color,
                         symbol="circle",
-                        line=dict(width=0.5, color="black"),
+                        line=dict(width=1.0, color="white"),
                     ),
                 ))
         else:
             fig.add_trace(go.Scatter(
-                x=ts, y=buoy, mode="markers", name="Buoy",
-                marker=dict(size=5, color="black"),
+                x=ts, y=buoy, mode="lines+markers", name="Buoy (point truth)",
+                line=dict(width=1.5, color=_BUOY_PRIMARY_COLOR),
+                marker=dict(
+                    size=8,
+                    color=_BUOY_PRIMARY_COLOR,
+                    line=dict(width=1.0, color="white"),
+                ),
             ))
 
     # Satellite / reanalysis products as solid lines in product-specific colors.
@@ -332,9 +366,9 @@ def build_sst_timeseries(
         if itemp is not None and itemp.notna().any():
             fig.add_trace(go.Scatter(
                 x=ts, y=itemp, mode="lines",
-                name="Buoy internal temp (hull)",
-                line=dict(width=1.5, color="#888888", dash="dot"),
-                opacity=0.85,
+                name="Buoy internal temp (hull, NOT water)",
+                line=dict(width=1.2, color="#9CA3AF", dash="dot"),
+                opacity=0.7,
             ))
 
     # Optional overlay: ERA5 2m air temperature at the buoy location.
@@ -347,8 +381,8 @@ def build_sst_timeseries(
             fig.add_trace(go.Scatter(
                 x=ts, y=airt, mode="lines",
                 name="Land / air temp (ERA5 2 m)",
-                line=dict(width=1.6, color="#8E24AA", dash="dashdot"),
-                opacity=0.9,
+                line=dict(width=1.4, color="#8E24AA", dash="dashdot"),
+                opacity=0.75,
             ))
 
     if apply_plot_style is not None:
@@ -364,6 +398,107 @@ def build_sst_timeseries(
             xaxis_title="Time", yaxis_title="SST (°C)",
         )
     return fig
+
+
+def build_internal_vs_air_diagnostic(
+    df: pd.DataFrame,
+    ts_col: str | None = None,
+) -> dict:
+    """Diagnostic comparison of buoy hull temperature vs ERA5 2 m air temp.
+
+    Returns ``{"fig": Figure, "stats": {...}}`` where the figure shows
+    both raw °C curves on a shared y-axis plus a Δ(internal − air)
+    secondary axis so the reader can confirm whether the two streams
+    actually move together (positive correlation) or are drifting in
+    opposite directions (negative correlation).
+
+    The accompanying stats dict reports sample count, mean/std of each
+    series, mean delta, the Pearson correlation, and whether the time
+    bases line up — useful for flagging timezone or sample-alignment
+    bugs that pure visual inspection might miss.
+    """
+    _require_plotly()
+    out: dict = {"stats": {
+        "n": 0, "mean_internal": float("nan"), "mean_air": float("nan"),
+        "mean_delta": float("nan"), "correlation": float("nan"),
+        "ts_overlap_hours": float("nan"),
+    }}
+    resolved_ts = _resolve_ts_col(df, ts_col)
+    itemp = extract_buoy_internal_temp(df)
+    airt = extract_land_air_temp(df)
+    if resolved_ts is None or itemp is None or airt is None:
+        out["fig"] = go.Figure().update_layout(
+            title="Internal vs air temp diagnostic — required columns missing",
+        )
+        return out
+
+    ts = pd.to_datetime(df[resolved_ts], utc=True, errors="coerce")
+    frame = pd.DataFrame({"ts": ts, "internal": itemp, "air": airt}).dropna()
+    if frame.empty:
+        out["fig"] = go.Figure().update_layout(
+            title="Internal vs air temp diagnostic — no overlapping samples",
+        )
+        return out
+    frame = frame.sort_values("ts")
+    frame["delta"] = frame["internal"] - frame["air"]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=frame["ts"], y=frame["internal"], mode="lines+markers",
+        name="Internal (hull)", line=dict(color="#5A5A5A", width=1.6),
+        marker=dict(size=4),
+    ))
+    fig.add_trace(go.Scatter(
+        x=frame["ts"], y=frame["air"], mode="lines+markers",
+        name="Air (ERA5 2 m)", line=dict(color="#8E24AA", width=1.6, dash="dashdot"),
+        marker=dict(size=4),
+    ))
+    fig.add_trace(go.Scatter(
+        x=frame["ts"], y=frame["delta"], mode="lines",
+        name="Δ = internal − air",
+        line=dict(color="#C62828", width=1.4, dash="dot"),
+        yaxis="y2", opacity=0.85,
+    ))
+    fig.add_hline(
+        y=0, line_color="#C62828", line_dash="dot",
+        line_width=0.8, opacity=0.5,
+        annotation_text="Δ = 0", annotation_position="top right",
+        annotation_font=dict(color="#C62828"),
+    )
+    fig.update_layout(
+        title=dict(
+            text="Hull vs ERA5 air temperature — sanity check",
+            font=dict(size=18),
+        ),
+        xaxis=dict(title="Time (UTC)"),
+        yaxis=dict(title="Temperature (°C)"),
+        yaxis2=dict(
+            title=dict(text="Δ internal − air (°C)", font=dict(color="#C62828")),
+            overlaying="y", side="right", showgrid=False,
+            tickfont=dict(color="#C62828"),
+        ),
+        height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1.0),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=60, r=60, t=70, b=50),
+    )
+
+    corr = float(frame["internal"].corr(frame["air"])) if len(frame) > 1 else float("nan")
+    overlap_hours = (
+        (frame["ts"].max() - frame["ts"].min()).total_seconds() / 3600.0
+        if len(frame) > 1 else 0.0
+    )
+    out["fig"] = fig
+    out["stats"] = {
+        "n": int(len(frame)),
+        "mean_internal": float(frame["internal"].mean()),
+        "mean_air": float(frame["air"].mean()),
+        "mean_delta": float(frame["delta"].mean()),
+        "correlation": corr,
+        "ts_overlap_hours": float(overlap_hours),
+    }
+    return out
 
 
 def build_residual_histogram(df: pd.DataFrame, ref: str = "OISST") -> Any:
@@ -702,4 +837,5 @@ __all__ = [
     "build_cusum_chart",
     "build_diurnal_composite",
     "build_amplitude_vs_wind",
+    "build_internal_vs_air_diagnostic",
 ]
