@@ -552,13 +552,13 @@ def build_enriched_group_figures(
                 ))
                 plotted_any = True
 
-        # SST products: overlay buoy SST (the point truth) on the
-        # primary axis so operators can visually anchor the comparison.
-        # We use larger markers + a thin connecting line + a white
-        # outline so the buoy stays the visually dominant trace even
-        # when 4–5 satellite product lines fight for attention. Color
-        # cycles per device so multi-buoy panels remain distinguishable.
-        _BUOY_PALETTE = ("#003E6B", "#1B5E20", "#4527A0", "#BF360C", "#37474F")
+        # Buoy is the point-truth on the SST-products chart, so we
+        # render it with a distinctive marker symbol (diamond), larger
+        # size, a bolder line, a white outline, AND a soft translucent
+        # halo underneath so it stays visually dominant over the 4–5
+        # reference products. Color cycles per device so multi-buoy
+        # panels remain distinguishable.
+        _BUOY_PALETTE = ("#E53935", "#1B5E20", "#4527A0", "#BF360C", "#37474F")
         if is_sst_group and overlay_buoy_sst:
             buoy_col = _find_col_by_keywords(
                 base, ("sst_buoy", "water temp", "ocean temp", "sst"),
@@ -573,22 +573,35 @@ def build_enriched_group_figures(
                     if not y.notna().any():
                         continue
                     name = (
-                        f"Buoy — {device}"
-                        if device is not None and len(devices) > 1
-                        else "Buoy (point truth)"
+                        f"Buoy ({device})" if device is not None
+                        else "Buoy"
                     )
                     color = _BUOY_PALETTE[di % len(_BUOY_PALETTE)]
+                    # Halo: wide, translucent line behind the main trace
+                    # so the buoy series reads as a glowing highlight
+                    # even when overlapping satellite products.
+                    fig.add_trace(go.Scatter(
+                        x=base.loc[mask, time_col],
+                        y=y,
+                        mode="lines",
+                        name=f"{name} halo",
+                        line=dict(width=10, color=color),
+                        opacity=0.18,
+                        hoverinfo="skip",
+                        showlegend=False,
+                        yaxis="y",
+                    ))
                     fig.add_trace(go.Scatter(
                         x=base.loc[mask, time_col],
                         y=y,
                         mode="lines+markers",
                         name=name,
-                        line=dict(width=1.8, color=color),
+                        line=dict(width=3.5, color=color),
                         marker=dict(
-                            size=8,
+                            size=12,
                             color=color,
-                            symbol="circle",
-                            line=dict(width=1.0, color="white"),
+                            symbol="diamond",
+                            line=dict(width=2.0, color="white"),
                         ),
                         yaxis="y",
                     ))
