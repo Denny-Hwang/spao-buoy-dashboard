@@ -237,11 +237,12 @@ _PRODUCT_COLORS: dict[str, str] = {
 
 # Buoy is the point-truth in every panel — give it a dedicated palette
 # that does not collide with any satellite product so the eye finds it
-# first. PNNL deep blue (single device) and a contrasting set when
-# multiple devices co-exist on one chart.
-_BUOY_PRIMARY_COLOR = "#003E6B"
+# first. Vivid red (single device) and a contrasting set when multiple
+# devices co-exist on one chart — chosen to stay visually distinct from
+# the cool-toned satellite/reanalysis product lines.
+_BUOY_PRIMARY_COLOR = "#E53935"
 _BUOY_DEVICE_COLORS: tuple[str, ...] = (
-    "#003E6B",  # PNNL deep blue
+    "#E53935",  # Vivid red
     "#1B5E20",  # Forest green
     "#4527A0",  # Indigo
     "#BF360C",  # Burnt orange
@@ -312,9 +313,30 @@ def build_sst_timeseries(
 
     # Buoy points — one series per device when device info is present.
     # The buoy is the truth source for B1/B2/B3 stats so we render it
-    # as the visually dominant trace: larger markers, a thin connecting
-    # line, an outline for contrast against satellite curves and the
-    # PNNL blue palette so it stays distinct from any reference colour.
+    # as the visually dominant trace: diamond markers, a bold
+    # connecting line, a white outline for contrast, and a soft
+    # translucent halo behind the line so it reads as a highlight over
+    # the satellite / reanalysis references.
+    def _add_buoy_trace(x, y, color, label):
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines",
+            name=f"{label} halo",
+            line=dict(width=10, color=color),
+            opacity=0.18,
+            hoverinfo="skip",
+            showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines+markers", name=label,
+            line=dict(width=3.5, color=color),
+            marker=dict(
+                size=12,
+                color=color,
+                symbol="diamond",
+                line=dict(width=2.0, color="white"),
+            ),
+        ))
+
     if buoy is not None:
         if dev_col is not None:
             devices = list(pd.Series(df[dev_col]).dropna().unique())
@@ -325,28 +347,9 @@ def build_sst_timeseries(
                 if not yb.notna().any():
                     continue
                 color = _BUOY_DEVICE_COLORS[di % len(_BUOY_DEVICE_COLORS)]
-                fig.add_trace(go.Scatter(
-                    x=xb, y=yb,
-                    mode="lines+markers",
-                    name=f"Buoy — {device}",
-                    line=dict(width=1.5, color=color),
-                    marker=dict(
-                        size=8,
-                        color=color,
-                        symbol="circle",
-                        line=dict(width=1.0, color="white"),
-                    ),
-                ))
+                _add_buoy_trace(xb, yb, color, f"Buoy ({device})")
         else:
-            fig.add_trace(go.Scatter(
-                x=ts, y=buoy, mode="lines+markers", name="Buoy (point truth)",
-                line=dict(width=1.5, color=_BUOY_PRIMARY_COLOR),
-                marker=dict(
-                    size=8,
-                    color=_BUOY_PRIMARY_COLOR,
-                    line=dict(width=1.0, color="white"),
-                ),
-            ))
+            _add_buoy_trace(ts, buoy, _BUOY_PRIMARY_COLOR, "Buoy")
 
     # Satellite / reanalysis products as solid lines in product-specific colors.
     for name, series in extract_products(df).items():

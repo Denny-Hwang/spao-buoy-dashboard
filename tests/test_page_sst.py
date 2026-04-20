@@ -107,10 +107,13 @@ def test_sst_timeseries_colors_per_device_when_dev_col_present():
     combined = pd.concat([df1, df2], ignore_index=True)
 
     fig = sst_panels.build_sst_timeseries(combined)
-    buoy_traces = [t for t in fig.data if str(t.name).startswith("Buoy")]
+    buoy_traces = [
+        t for t in fig.data
+        if str(t.name).startswith("Buoy") and t.showlegend is not False
+    ]
     assert len(buoy_traces) == 2
     names = {t.name for t in buoy_traces}
-    assert names == {"Buoy — Buoy-A", "Buoy — Buoy-B"}
+    assert names == {"Buoy (Buoy-A)", "Buoy (Buoy-B)"}
 
 
 def test_sst_timeseries_missing_time_col_returns_empty_fig():
