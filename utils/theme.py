@@ -126,15 +126,22 @@ def inject_custom_css():
         font-weight: 500 !important;
     }
 
-    /* ── Phase 1 / Phase 2 / Phase 3 section separators in the sidebar nav ── */
-    /* PHASE 1 banner: attach to the first Phase 1 page (Overview) but
-       explicitly EXCLUDE both Phase 2 Overview *and* Phase 3 Overview
-       since their hrefs also contain the word "Overview". */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])):not(:has(a[href*="Phase3"])) {
+    /* ── Phase 1 / Phase 2 / Phase 3 section separators in the sidebar nav ──
+       Selector strategy: we use ``[href$="…"]`` (ends-with) because the
+       previous ``[href*="Phase3"]`` exclusion inside ``:not(:has())`` did
+       not reliably cascade across all browsers' ``:has()`` implementations
+       — Phase 3 pages were still inheriting the Phase 1 banner. End-match
+       is unambiguous: Streamlit strips the leading index+emoji when
+       routing, so the href ends in the bare page stem (``/Overview``,
+       ``/Phase2_Overview``, ``/Phase3_Overview``). */
+
+    /* PHASE 1 banner: anchored on the Phase 1 Overview (stem ends in
+       "/Overview" with NO preceding "Phase" prefix). */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Overview"]) {
         position: relative;
         margin-top: 6px;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])):not(:has(a[href*="Phase3"]))::before {
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Overview"])::before {
         content: "PHASE 1 — OPERATIONAL";
         display: block;
         font-size: 10px;
@@ -143,16 +150,16 @@ def inject_custom_css():
         color: #5A5A5A;
         padding: 6px 1rem 4px 1rem;
     }
-    /* PHASE 2 banner: anchored on Phase2_Overview (the first Phase 2
-       page in sidebar order) so the "📖 Phase2 Overview" entry renders
-       BELOW the Phase 2 section bar. */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"]) {
+
+    /* PHASE 2 banner anchored on Phase2_Overview. Same styling (divider
+       line + caption) as before. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Phase2_Overview"]) {
         position: relative;
         margin-top: 14px;
         padding-top: 12px;
         border-top: 2px solid #003E6B;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"])::before {
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Phase2_Overview"])::before {
         content: "PHASE 2 — SCIENTIFIC";
         display: block;
         font-size: 10px;
@@ -161,16 +168,23 @@ def inject_custom_css():
         color: #5A5A5A;
         padding: 2px 1rem 4px 1rem;
     }
-    /* PHASE 3 banner: anchored on Phase3_Overview, mirrors the Phase 2
-       block so all three groups read consistently. */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase3_Overview"]) {
+    /* Divider line at the bottom of the Phase 2 group — anchored on the
+       last Phase 2 page (Data_Enrichment). Mirrors the top border that
+       opens the Phase 2 group so the whole section reads as a bracket. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Data_Enrichment"]) {
+        padding-bottom: 10px;
+        border-bottom: 2px solid #003E6B;
+        margin-bottom: 6px;
+    }
+
+    /* PHASE 3 banner anchored on Phase3_Overview. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Phase3_Overview"]) {
         position: relative;
         margin-top: 14px;
         padding-top: 12px;
-        border-top: 2px solid #003E6B;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase3_Overview"])::before {
-        content: "PHASE 3 — RF / IRIDIUM LINK";
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href$="/Phase3_Overview"])::before {
+        content: "PHASE 3 — SATELLITE SIMULATION";
         display: block;
         font-size: 10px;
         font-weight: 700;
@@ -193,10 +207,9 @@ def inject_custom_css():
         margin-top: 0 !important;
     }
 
-    /* Ensure sidebar content doesn't get cut off — reserve space for the
-       footer AND the Phase 3 dev-toggle that we pin above it. */
+    /* Ensure sidebar content doesn't get cut off — reserve space for footer. */
     section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-        padding-bottom: 130px !important;
+        padding-bottom: 60px !important;
     }
 
     /* Contain sidebar so position:fixed children (footer + dev toggle)
@@ -216,32 +229,29 @@ def inject_custom_css():
         z-index: 999;
     }
 
-    /* ── Phase 3 dev toggle pinned to the bottom of the sidebar ──
-       The toggle is rendered by ``render_phase3_visibility_toggle()`` as
-       a single ``st.expander``. We mark its preceding sibling with the
-       sentinel ``<div id="p3-dev-toggle-anchor">`` so we can locate the
-       expander unambiguously without relying on stExpander order across
-       the whole sidebar. The marker itself is hidden; the next sibling
-       (the expander) is repositioned ``fixed`` above the footer. */
+    /* ── Phase 3 dev toggle — host inside the Phase 3 section ──
+       The ``<div id="p3-dev-toggle-anchor">`` marker is hidden; a small
+       script in :func:`render_phase3_visibility_toggle` moves the toggle
+       DOM node to sit right ABOVE the Phase 3 banner in the sidebar
+       nav, so it visually belongs to the Phase 3 group. */
     section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) {
         display: none !important;
     }
-    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) + [data-testid="element-container"] {
-        position: fixed !important;
-        bottom: 56px !important;
-        left: 0 !important;
-        right: 0 !important;
-        padding: 6px 10px !important;
-        background: #FFFFFF !important;
-        border-top: 1px solid #DEDEDE !important;
-        z-index: 998 !important;
-        max-height: 70px !important;
-        overflow: visible !important;
+    /* Visual framing for the toggle AFTER the JS has moved it into the nav. */
+    #p3-dev-toggle-host {
+        padding: 6px 10px 8px 10px;
+        margin-top: 10px;
+        background: #f8f8f8;
+        border-top: 1px dashed #DEDEDE;
+        border-bottom: 1px dashed #DEDEDE;
     }
-    /* When the dev expander is open, let it grow upward without being
-       clipped by the fixed-height container. */
-    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) + [data-testid="element-container"]:has([aria-expanded="true"]) {
-        max-height: 200px !important;
+    #p3-dev-toggle-host .p3-dev-toggle-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        color: #5A5A5A;
+        display: block;
+        margin-bottom: 4px;
     }
     .sidebar-footer p {
         color: #5A5A5A;
@@ -369,44 +379,176 @@ def _inject_phase3_hide_css() -> None:
     )
 
 
+_P3_WIDGET_KEY = "_p3_pages_visible_widget"
+
+
+def _on_p3_toggle_change() -> None:
+    """Copy the widget's current value into the persistent session key."""
+    st.session_state[P3_VISIBILITY_KEY] = bool(
+        st.session_state.get(_P3_WIDGET_KEY, False)
+    )
+
+
 def render_phase3_visibility_toggle() -> None:
-    """Render the Phase 3 visibility toggle at the bottom of the sidebar.
+    """Render the Phase 3 visibility toggle.
 
-    Persistence
-    -----------
-    We initialise ``st.session_state[P3_VISIBILITY_KEY]`` *before*
-    constructing the widget and pass **only** ``key=`` (no ``value=``).
-    Passing both forms causes Streamlit to overwrite the user's
-    toggle on every page rerun, which is the bug operators hit when
-    flipping the toggle on, then navigating between Phase 3 pages.
+    Persistence — the shadow-key pattern
+    ------------------------------------
+    Previous attempts that bound the widget directly to
+    ``p3_pages_visible`` reset on every page navigation, because when
+    the widget is unmounted (e.g. its expander has just been torn down
+    by Streamlit's reconciler on the new page) Streamlit removes the
+    bound key from ``st.session_state``. To survive teardown we use
+    **two** keys:
 
-    Position
-    --------
-    The expander is preceded by an HTML marker
-    (``<div id="p3-dev-toggle-anchor">``) so the CSS in
-    :func:`inject_custom_css` can find the *exact* expander and
-    position it ``fixed`` above the sidebar footer.
+    * ``_p3_pages_visible_widget`` is the ephemeral widget key;
+      Streamlit is free to GC it whenever.
+    * ``p3_pages_visible`` is our durable state; it lives for the
+      whole session and never binds to a widget.
+
+    The ``on_change`` callback syncs widget→durable; we also seed the
+    widget from durable on every rerun so the checkbox reflects the
+    persisted choice when the page re-mounts.
+
+    Placement — host inside the Phase 3 nav section
+    -----------------------------------------------
+    The anchor div lets a tiny JS snippet (``_inject_phase3_toggle_host_js``)
+    move the checkbox DOM node to sit right above the Phase 3 banner
+    in the sidebar nav. This is a visual-only relocation — the
+    widget's React binding and session-state wiring stay intact.
     """
+    # 1. Seed durable state once.
     if P3_VISIBILITY_KEY not in st.session_state:
         st.session_state[P3_VISIBILITY_KEY] = False
 
-    # Anchor + expander render together so the CSS sibling selector
-    # (``+``) deterministically reaches our expander.
+    # 2. Make sure the widget mounts in sync with the durable state on
+    #    every rerun — this is what repairs the value after Streamlit
+    #    tears the widget down on a page change.
+    st.session_state[_P3_WIDGET_KEY] = bool(st.session_state[P3_VISIBILITY_KEY])
+
+    # 3. Anchor marker so our JS can find this specific checkbox.
     st.sidebar.markdown(
         '<div id="p3-dev-toggle-anchor"></div>',
         unsafe_allow_html=True,
     )
-    with st.sidebar.expander("Developer options", expanded=False):
-        st.checkbox(
-            "Show Phase 3 pages (experimental)",
-            key=P3_VISIBILITY_KEY,
-            help="Phase 3 (RF / Iridium link analysis, pages 12–15) is "
-                 "under active validation and hidden by default. Enable "
-                 "to see the satellite-geometry pages. The choice is "
-                 "preserved while you navigate between Phase 3 pages.",
-        )
+    # 4. The widget itself — no expander (expanders can be torn down
+    #    when collapsed and their inner widgets lose state). A plain
+    #    checkbox with a section-style caption is enough.
+    st.sidebar.markdown(
+        '<span class="p3-dev-toggle-label">DEVELOPER OPTIONS</span>',
+        unsafe_allow_html=True,
+    )
+    st.sidebar.checkbox(
+        "Show Phase 3 pages (experimental)",
+        key=_P3_WIDGET_KEY,
+        on_change=_on_p3_toggle_change,
+        help="Phase 3 (pages 12–15, satellite-geometry / RF analysis) "
+             "is still being validated. Toggle here to reveal them; "
+             "your choice persists while you navigate between pages.",
+    )
+
+    # 5. JS that moves the anchor + checkbox + label DOM block to sit
+    #    just above the Phase 3 banner in the sidebar nav. Safe to run
+    #    even when the Phase 3 links are hidden (script no-ops in
+    #    that case).
+    _inject_phase3_toggle_host_js()
+
     if not phase3_pages_visible():
         _inject_phase3_hide_css()
+
+
+def _inject_phase3_toggle_host_js() -> None:
+    """Inject a MutationObserver that moves the dev-toggle into the Phase 3 area.
+
+    Streamlit renders ``st.sidebar.*`` widgets into ``stSidebarUserContent``
+    (above the nav). Streamlit does not let us inject DOM inside the
+    auto-generated nav list, so we relocate via JS after render. The
+    observer idempotently keeps the toggle in place on every rerun.
+    """
+    st.markdown(
+        """
+        <script>
+        (function () {
+          const MARKER_ID = 'p3-dev-toggle-anchor';
+          const HOST_ID = 'p3-dev-toggle-host';
+
+          function elementContainerFor(node) {
+            return node ? node.closest('[data-testid="element-container"]') : null;
+          }
+
+          function locateTogglePieces(root) {
+            const anchor = root.getElementById(MARKER_ID);
+            if (!anchor) return null;
+            const anchorCont = elementContainerFor(anchor);
+            if (!anchorCont) return null;
+            // The label <span> and the checkbox each get their own
+            // element-container emitted immediately after the anchor.
+            const labelCont = anchorCont.nextElementSibling;
+            const widgetCont = labelCont ? labelCont.nextElementSibling : null;
+            if (!labelCont || !widgetCont) return null;
+            return {anchorCont, labelCont, widgetCont};
+          }
+
+          function locatePhase3Li(root) {
+            // Match the Phase 3 Overview <li> robustly: href ends with
+            // "/Phase3_Overview" OR contains "Phase3_Overview".
+            const nav = root.querySelector('[data-testid="stSidebarNavItems"]');
+            if (!nav) return null;
+            const links = nav.querySelectorAll('a[href*="Phase3_Overview"]');
+            for (const a of links) {
+              const li = a.closest('li');
+              if (li) return li;
+            }
+            return null;
+          }
+
+          function ensureHost(root, pieces) {
+            let host = root.getElementById(HOST_ID);
+            if (!host) {
+              host = root.createElement('div');
+              host.id = HOST_ID;
+              // Order: label → widget
+              host.appendChild(pieces.labelCont);
+              host.appendChild(pieces.widgetCont);
+            } else {
+              // Idempotency — if Streamlit re-emitted either piece we
+              // re-adopt them into the host.
+              if (pieces.labelCont.parentElement !== host) {
+                host.insertBefore(pieces.labelCont, host.firstChild);
+              }
+              if (pieces.widgetCont.parentElement !== host) {
+                host.appendChild(pieces.widgetCont);
+              }
+            }
+            return host;
+          }
+
+          function rearrange() {
+            const root = document;
+            const pieces = locateTogglePieces(root);
+            const phase3Li = locatePhase3Li(root);
+            if (!pieces || !phase3Li) return;
+            const host = ensureHost(root, pieces);
+            if (host.parentElement !== phase3Li.parentElement
+                || host.nextSibling !== phase3Li) {
+              phase3Li.parentElement.insertBefore(host, phase3Li);
+            }
+          }
+
+          // Attempt now + on every DOM change (Streamlit reruns the
+          // sidebar on every interaction).
+          rearrange();
+          if (window.__p3ToggleObserver) {
+            window.__p3ToggleObserver.disconnect();
+          }
+          const obs = new MutationObserver(rearrange);
+          window.__p3ToggleObserver = obs;
+          obs.observe(document.body, {childList: true, subtree: true});
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def require_phase3_visible() -> None:
