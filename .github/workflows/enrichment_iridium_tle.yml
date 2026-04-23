@@ -1,0 +1,34 @@
+name: Phase 3 TLE Enrichment (Iridium + GPS)
+
+on:
+  schedule:
+    # Every 6 hours at :20 past the hour (offset from the Phase 2 :15 cron
+    # so the two never stomp each other's gspread quota).
+    - cron: '20 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run without writing to Sheets'
+        default: 'false'
+
+jobs:
+  fetch-tle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements-cron.txt
+      - env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          python scripts/enrichment_iridium_tle.py $DRY_FLAG

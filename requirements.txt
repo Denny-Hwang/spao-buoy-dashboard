@@ -13,3 +13,4 @@ staticmap>=0.5.7
 pymannkendall>=1.4
 scipy>=1.11
 timezonefinder>=6.5
+sgp4>=2.22
