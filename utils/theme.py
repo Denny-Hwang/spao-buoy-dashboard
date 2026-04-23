@@ -126,15 +126,15 @@ def inject_custom_css():
         font-weight: 500 !important;
     }
 
-    /* ── Phase 1 / Phase 2 section separators in the sidebar nav ── */
+    /* ── Phase 1 / Phase 2 / Phase 3 section separators in the sidebar nav ── */
     /* PHASE 1 banner: attach to the first Phase 1 page (Overview) but
-       explicitly EXCLUDE the new Phase 2 Overview page whose href also
-       contains the word "Overview". */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])) {
+       explicitly EXCLUDE both Phase 2 Overview *and* Phase 3 Overview
+       since their hrefs also contain the word "Overview". */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])):not(:has(a[href*="Phase3"])) {
         position: relative;
         margin-top: 6px;
     }
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"]))::before {
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Overview"]):not(:has(a[href*="Phase2"])):not(:has(a[href*="Phase3"]))::before {
         content: "PHASE 1 — OPERATIONAL";
         display: block;
         font-size: 10px;
@@ -143,9 +143,9 @@ def inject_custom_css():
         color: #5A5A5A;
         padding: 6px 1rem 4px 1rem;
     }
-    /* PHASE 2 banner: now anchored on Phase2_Overview (the first Phase 2
-       page in sidebar order) rather than TENG_Performance, so the "📖
-       Phase2 Overview" entry renders BELOW the Phase 2 section bar. */
+    /* PHASE 2 banner: anchored on Phase2_Overview (the first Phase 2
+       page in sidebar order) so the "📖 Phase2 Overview" entry renders
+       BELOW the Phase 2 section bar. */
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"]) {
         position: relative;
         margin-top: 14px;
@@ -154,6 +154,23 @@ def inject_custom_css():
     }
     section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase2_Overview"])::before {
         content: "PHASE 2 — SCIENTIFIC";
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        color: #5A5A5A;
+        padding: 2px 1rem 4px 1rem;
+    }
+    /* PHASE 3 banner: anchored on Phase3_Overview, mirrors the Phase 2
+       block so all three groups read consistently. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase3_Overview"]) {
+        position: relative;
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 2px solid #003E6B;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] li:has(a[href*="Phase3_Overview"])::before {
+        content: "PHASE 3 — RF / IRIDIUM LINK";
         display: block;
         font-size: 10px;
         font-weight: 700;
@@ -176,12 +193,14 @@ def inject_custom_css():
         margin-top: 0 !important;
     }
 
-    /* Ensure sidebar content doesn't get cut off — reserve space for footer */
+    /* Ensure sidebar content doesn't get cut off — reserve space for the
+       footer AND the Phase 3 dev-toggle that we pin above it. */
     section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-        padding-bottom: 60px !important;
+        padding-bottom: 130px !important;
     }
 
-    /* Contain sidebar so fixed footer is relative to it, not viewport */
+    /* Contain sidebar so position:fixed children (footer + dev toggle)
+       anchor to the sidebar rather than the viewport. */
     section[data-testid="stSidebar"] {
         contain: layout !important;
     }
@@ -195,6 +214,34 @@ def inject_custom_css():
         background: #FFFFFF;
         box-sizing: border-box;
         z-index: 999;
+    }
+
+    /* ── Phase 3 dev toggle pinned to the bottom of the sidebar ──
+       The toggle is rendered by ``render_phase3_visibility_toggle()`` as
+       a single ``st.expander``. We mark its preceding sibling with the
+       sentinel ``<div id="p3-dev-toggle-anchor">`` so we can locate the
+       expander unambiguously without relying on stExpander order across
+       the whole sidebar. The marker itself is hidden; the next sibling
+       (the expander) is repositioned ``fixed`` above the footer. */
+    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) {
+        display: none !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) + [data-testid="element-container"] {
+        position: fixed !important;
+        bottom: 56px !important;
+        left: 0 !important;
+        right: 0 !important;
+        padding: 6px 10px !important;
+        background: #FFFFFF !important;
+        border-top: 1px solid #DEDEDE !important;
+        z-index: 998 !important;
+        max-height: 70px !important;
+        overflow: visible !important;
+    }
+    /* When the dev expander is open, let it grow upward without being
+       clipped by the fixed-height container. */
+    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) + [data-testid="element-container"]:has([aria-expanded="true"]) {
+        max-height: 200px !important;
     }
     .sidebar-footer p {
         color: #5A5A5A;
@@ -233,7 +280,15 @@ def inject_custom_css():
 
 
 def render_sidebar():
-    """Render sidebar header with PNNL / SPAO BUOY branding at top, org info at bottom."""
+    """Render sidebar header with PNNL / SPAO BUOY branding at top, org info at bottom.
+
+    Layout, top → bottom:
+      1. PNNL / SPAO BUOY brand block (st.sidebar.markdown)
+      2. Streamlit auto page-nav (rendered by Streamlit AFTER all
+         st.sidebar.* calls)
+      3. Phase 3 dev-toggle expander (CSS-pinned just above the footer)
+      4. Footer (PNNL · DOE) — CSS position:fixed, bottom:0
+    """
     logo_html = ""
     if SPAO_LOGO_BASE64:
         logo_html = (
@@ -252,8 +307,9 @@ def render_sidebar():
     )
 
     # Phase 3 pages are gated behind a developer toggle (default: hidden)
-    # while the RF-analysis pages are still in validation. Rendered as an
-    # unobtrusive expander so Phase 1 operators aren't distracted.
+    # while the RF-analysis pages are still in validation. The expander is
+    # CSS-pinned to the bottom of the sidebar (above the footer) via the
+    # ``#p3-dev-toggle-anchor`` marker so it stays out of the way.
     render_phase3_visibility_toggle()
 
     st.sidebar.markdown(
@@ -316,19 +372,38 @@ def _inject_phase3_hide_css() -> None:
 def render_phase3_visibility_toggle() -> None:
     """Render the Phase 3 visibility toggle at the bottom of the sidebar.
 
-    When the toggle is off we also inject CSS that hides the four
-    Phase 3 page links from the sidebar nav. Each Phase 3 page should
-    call :func:`require_phase3_visible` at the top to also bail out
-    when the toggle is off (covers direct-URL navigation).
+    Persistence
+    -----------
+    We initialise ``st.session_state[P3_VISIBILITY_KEY]`` *before*
+    constructing the widget and pass **only** ``key=`` (no ``value=``).
+    Passing both forms causes Streamlit to overwrite the user's
+    toggle on every page rerun, which is the bug operators hit when
+    flipping the toggle on, then navigating between Phase 3 pages.
+
+    Position
+    --------
+    The expander is preceded by an HTML marker
+    (``<div id="p3-dev-toggle-anchor">``) so the CSS in
+    :func:`inject_custom_css` can find the *exact* expander and
+    position it ``fixed`` above the sidebar footer.
     """
+    if P3_VISIBILITY_KEY not in st.session_state:
+        st.session_state[P3_VISIBILITY_KEY] = False
+
+    # Anchor + expander render together so the CSS sibling selector
+    # (``+``) deterministically reaches our expander.
+    st.sidebar.markdown(
+        '<div id="p3-dev-toggle-anchor"></div>',
+        unsafe_allow_html=True,
+    )
     with st.sidebar.expander("Developer options", expanded=False):
         st.checkbox(
             "Show Phase 3 pages (experimental)",
             key=P3_VISIBILITY_KEY,
-            value=False,
             help="Phase 3 (RF / Iridium link analysis, pages 12–15) is "
                  "under active validation and hidden by default. Enable "
-                 "to see the satellite-geometry pages.",
+                 "to see the satellite-geometry pages. The choice is "
+                 "preserved while you navigate between Phase 3 pages.",
         )
     if not phase3_pages_visible():
         _inject_phase3_hide_css()

@@ -120,13 +120,21 @@ if df is None or df.empty:
 
 
 # ── Load TLE (skip when FY25: warn that geometry uses current TLE, which is stale for 2025-09) --
+tle_refresh_col, _ = st.columns([1, 5])
+if tle_refresh_col.button("🔄 Refresh TLE", key="p14_refresh_tle",
+                          help="Re-read the `_iridium_tle` / `_gps_tle` "
+                               "tabs. Useful right after the cron runs."):
+    tle_io.force_refresh_tle()
+    st.rerun()
+
 iridium_sats = tle_io.load_iridium_tle()
 gps_sats = tle_io.load_gps_tle()
 if not iridium_sats or not gps_sats:
     st.warning(
         "TLE data is missing in `_iridium_tle` / `_gps_tle`. Trigger "
-        "the `enrichment_iridium_tle` GitHub Action first. Enrichment "
-        "columns will be empty until that runs."
+        "the **Phase 3 TLE Enrichment** GitHub Action and then click "
+        "**🔄 Refresh TLE** above. Enrichment columns will be empty "
+        "until that completes."
     )
 
 if is_fy25:

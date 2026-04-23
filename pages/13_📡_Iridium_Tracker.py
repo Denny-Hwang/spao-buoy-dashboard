@@ -61,13 +61,25 @@ except Exception as exc:  # noqa: BLE001
     st.stop()
 
 
+refresh_col, info_col = st.columns([1, 5])
+if refresh_col.button("🔄 Refresh TLE", key="p13_refresh_tle",
+                      help="Clear the in-process TLE cache and re-read "
+                           "the `_iridium_tle` Sheet tab. Use after the "
+                           "GitHub Action has just finished."):
+    tle_io.force_refresh_tle()
+    st.rerun()
+
 sats = tle_io.load_iridium_tle()
 if not sats:
-    st.warning(
-        "No Iridium TLE data found. Trigger the `enrichment_iridium_tle` "
-        "GitHub Action to populate the `_iridium_tle` tab, then reload."
+    info_col.warning(
+        "No Iridium TLE data found in the `_iridium_tle` Sheet tab. "
+        "Trigger the **Phase 3 TLE Enrichment** GitHub Action and then "
+        "click **🔄 Refresh TLE** above (the empty result is *not* "
+        "cached, but Streamlit may still hold a stale view until you "
+        "refresh)."
     )
     st.stop()
+info_col.caption(f"Loaded {len(sats)} Iridium satellites from `_iridium_tle`.")
 
 
 # ── Observer panel -----------------------------------------------------
