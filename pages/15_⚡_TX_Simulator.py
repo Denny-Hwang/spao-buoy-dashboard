@@ -27,12 +27,13 @@ st.set_page_config(page_title="TX Simulator", page_icon="⚡", layout="wide")
 
 from utils.theme import (  # noqa: E402
     render_header, render_footer, render_sidebar, inject_custom_css,
-    PNNL_BLUE,
+    require_phase3_visible, PNNL_BLUE,
 )
 
 inject_custom_css()
 render_sidebar()
 render_header()
+require_phase3_visible()
 
 st.markdown(
     f'<h1 style="color:{PNNL_BLUE}; margin-top:0;">⚡ TX Simulator</h1>',

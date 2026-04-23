@@ -21,12 +21,13 @@ st.set_page_config(page_title="Phase 3 Overview", page_icon="🛰️", layout="w
 
 from utils.theme import (  # noqa: E402
     render_header, render_footer, render_sidebar, inject_custom_css,
-    PNNL_BLUE,
+    require_phase3_visible, PNNL_BLUE,
 )
 
 inject_custom_css()
 render_sidebar()
 render_header()
+require_phase3_visible()
 
 # Phase 3 sidebar (enable toggle + TZ selector).
 try:
@@ -258,10 +259,11 @@ st.markdown(
   both `Timestamp` (UTC) and `Timestamp_local` / `Timestamp_tz` columns.
 - **Caching** — TLE reads are cached for 1 h inside the Streamlit
   process. Clear via ``Refresh Data`` (where shown) or redeploy.
-- **Feature toggle** — `Show Phase 3 RF analysis` must be enabled in
-  the sidebar for any of pages 13–15 to render their analysis panels;
-  otherwise they render a polite placeholder so operators who only
-  care about Phase 1/2 aren't distracted.
+- **Visibility gate** — Phase 3 is still in validation, so the four
+  pages (12–15) are **hidden from the sidebar by default**. Open the
+  *Developer options* expander at the bottom of the sidebar and tick
+  **Show Phase 3 pages (experimental)** to reveal them. The toggle
+  persists across page navigation within the same session.
 """
 )
 
