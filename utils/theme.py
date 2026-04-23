@@ -250,6 +250,12 @@ def render_sidebar():
         '</div>',
         unsafe_allow_html=True,
     )
+
+    # Phase 3 pages are gated behind a developer toggle (default: hidden)
+    # while the RF-analysis pages are still in validation. Rendered as an
+    # unobtrusive expander so Phase 1 operators aren't distracted.
+    render_phase3_visibility_toggle()
+
     st.sidebar.markdown(
         '<div class="sidebar-footer">'
         '<p>Pacific Northwest National Laboratory<br>'
@@ -257,6 +263,91 @@ def render_sidebar():
         '</div>',
         unsafe_allow_html=True,
     )
+
+
+# ── Phase 3 visibility gate (dev toggle) ─────────────────────────────
+P3_VISIBILITY_KEY = "p3_pages_visible"
+
+# Substrings of Phase 3 page slugs — used by both the CSS hider and the
+# in-page ``phase3_pages_visible`` check so we only have one list to keep
+# in sync when page names change.
+P3_PAGE_SLUGS: tuple[str, ...] = (
+    "Phase3_Overview",
+    "Iridium_Tracker",
+    "Field_Replay",
+    "TX_Simulator",
+)
+
+
+def phase3_pages_visible() -> bool:
+    """Return True when Phase 3 pages should be shown in the sidebar/rendered.
+
+    Default is **False** — Phase 3 is still in validation. The toggle
+    is persisted under ``st.session_state[P3_VISIBILITY_KEY]``.
+    """
+    return bool(st.session_state.get(P3_VISIBILITY_KEY, False))
+
+
+def _inject_phase3_hide_css() -> None:
+    """Hide the Phase 3 page links in the sidebar nav via CSS.
+
+    Uses ``:has()`` + attribute-substring selectors on the anchor's
+    ``href``. Streamlit strips the leading number + emoji when
+    building the URL (e.g. ``/Phase3_Overview``) so we can match by
+    slug substring without worrying about emoji encoding.
+    """
+    selectors_a = ", ".join(
+        f'section[data-testid="stSidebar"] [data-testid="stSidebarNav"] '
+        f'a[href*="{slug}"]'
+        for slug in P3_PAGE_SLUGS
+    )
+    selectors_li = ", ".join(
+        f'section[data-testid="stSidebar"] [data-testid="stSidebarNav"] '
+        f'li:has(a[href*="{slug}"])'
+        for slug in P3_PAGE_SLUGS
+    )
+    st.markdown(
+        f"<style>{selectors_li} {{ display: none !important; }} "
+        f"{selectors_a} {{ display: none !important; }}</style>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_phase3_visibility_toggle() -> None:
+    """Render the Phase 3 visibility toggle at the bottom of the sidebar.
+
+    When the toggle is off we also inject CSS that hides the four
+    Phase 3 page links from the sidebar nav. Each Phase 3 page should
+    call :func:`require_phase3_visible` at the top to also bail out
+    when the toggle is off (covers direct-URL navigation).
+    """
+    with st.sidebar.expander("Developer options", expanded=False):
+        st.checkbox(
+            "Show Phase 3 pages (experimental)",
+            key=P3_VISIBILITY_KEY,
+            value=False,
+            help="Phase 3 (RF / Iridium link analysis, pages 12–15) is "
+                 "under active validation and hidden by default. Enable "
+                 "to see the satellite-geometry pages.",
+        )
+    if not phase3_pages_visible():
+        _inject_phase3_hide_css()
+
+
+def require_phase3_visible() -> None:
+    """Call at the top of every Phase 3 page — bail out if the toggle is off.
+
+    Shows a friendly banner so the user knows how to re-enable Phase 3
+    instead of seeing a crash or a blank page.
+    """
+    if phase3_pages_visible():
+        return
+    st.info(
+        "🚧 **Phase 3 is hidden.** These pages are still in validation. "
+        "To enable, open the **Developer options** expander at the bottom "
+        "of the sidebar and tick *Show Phase 3 pages (experimental)*."
+    )
+    st.stop()
 
 
 # === UI Components ===

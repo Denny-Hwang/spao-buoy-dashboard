@@ -20,7 +20,7 @@ SCOPES = [
 ]
 # Exclude default Google Sheets tabs ("Sheet1", "Sheet2", …) and the error log
 _DEFAULT_SHEET_RE = re.compile(r"^Sheet\d*$")
-EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily"}
+EXCLUDED_TABS = {"_errors", "_devices", "Derived_Daily", "_iridium_tle", "_gps_tle"}
 
 # Columns containing long hex strings — always placed at the end of tables
 _HEX_COLUMNS = {"Raw Hex", "Payload", "data", "hex", "Hex"}
