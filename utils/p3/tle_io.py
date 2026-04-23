@@ -188,15 +188,55 @@ def _cached(fn):
 
 
 @_cached
-def load_iridium_tle(sheet_id: str | None = None) -> list[Sat]:
-    """Return parsed Iridium satellites from the ``_iridium_tle`` tab."""
+def _load_iridium_tle_cached(sheet_id: str | None = None) -> list[Sat]:
     return _df_to_sats(_read_tab(TAB_IRIDIUM, sheet_id))
 
 
 @_cached
-def load_gps_tle(sheet_id: str | None = None) -> list[Sat]:
-    """Return parsed GPS satellites from the ``_gps_tle`` tab."""
+def _load_gps_tle_cached(sheet_id: str | None = None) -> list[Sat]:
     return _df_to_sats(_read_tab(TAB_GPS, sheet_id))
+
+
+def _drop_cache(fn) -> None:
+    """Best-effort ``st.cache_data.clear()`` for one function."""
+    clearer = getattr(fn, "clear", None)
+    if callable(clearer):
+        try:
+            clearer()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def load_iridium_tle(sheet_id: str | None = None) -> list[Sat]:
+    """Return parsed Iridium satellites from the ``_iridium_tle`` tab.
+
+    Empty results are deliberately *not* cached: when the cron has not
+    yet populated the sheet (or the read transiently fails) we don't
+    want to lock the page into "no data" for the full 1 h TTL. The
+    next call after the cron writes will see fresh data.
+    """
+    sats = _load_iridium_tle_cached(sheet_id)
+    if not sats:
+        _drop_cache(_load_iridium_tle_cached)
+    return sats
+
+
+def load_gps_tle(sheet_id: str | None = None) -> list[Sat]:
+    """Return parsed GPS satellites — same empty-skip semantics as Iridium."""
+    sats = _load_gps_tle_cached(sheet_id)
+    if not sats:
+        _drop_cache(_load_gps_tle_cached)
+    return sats
+
+
+def force_refresh_tle() -> None:
+    """Clear both TLE caches so the next call re-reads the Sheet.
+
+    Used by the ``Refresh TLE`` button on the Tracker page so operators
+    can pull data immediately after triggering the cron.
+    """
+    _drop_cache(_load_iridium_tle_cached)
+    _drop_cache(_load_gps_tle_cached)
 
 
 def _health_from_sats(tab: str, sats: list[Sat],

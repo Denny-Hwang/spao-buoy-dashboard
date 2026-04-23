@@ -67,3 +67,25 @@ def test_require_phase3_visible_noop_when_visible():
     theme.st.session_state[theme.P3_VISIBILITY_KEY] = True
     # Must not raise.
     theme.require_phase3_visible()
+
+
+def test_render_toggle_initialises_session_state_only_once():
+    """The widget must NOT clobber an existing user choice on rerun.
+
+    Operators were hitting the bug where toggling the checkbox on, then
+    navigating to another Phase 3 page, reset it to off — that happened
+    because ``st.checkbox(value=False, key=...)`` was being called every
+    rerun. The fix is to seed session_state explicitly *only* if the
+    key is missing, and never pass ``value=`` to the widget.
+    """
+    # User has previously turned the toggle on.
+    theme.st.session_state[theme.P3_VISIBILITY_KEY] = True
+    theme.render_phase3_visibility_toggle()
+    # After the rerun, the user's choice must still be True.
+    assert theme.st.session_state[theme.P3_VISIBILITY_KEY] is True
+
+
+def test_render_toggle_seeds_default_when_absent():
+    theme.st.session_state.pop(theme.P3_VISIBILITY_KEY, None)
+    theme.render_phase3_visibility_toggle()
+    assert theme.st.session_state[theme.P3_VISIBILITY_KEY] is False
