@@ -264,7 +264,7 @@ st.dataframe(
 )
 
 
-# ── Event picker: DROPDOWN, not slider -----------------------------
+# ── Event picker: DROPDOWN + Play controls -------------------------
 if filtered.empty:
     st.info("No events match the current filter.")
 else:
@@ -288,14 +288,50 @@ else:
         retry_tag = f" · rb2={rb2:.1f}s" if rb2 > 0 else ""
         return f"{ts_str}  ·  {dev}  ·  rb1={rb1:.1f}s{retry_tag}  ·  IRI={nv_str}{fail_tag}"
 
+    # Event selection state — use a dedicated key the Play loop can
+    # write to without racing the selectbox widget. We keep the
+    # widget key separate (``p14_event_select``) to avoid the
+    # "session_state cannot be set after widget" error.
+    if "p14_event_idx" not in st.session_state:
+        st.session_state["p14_event_idx"] = 0
+    # Clamp in case a prior filter change left a stale value.
+    st.session_state["p14_event_idx"] = min(
+        max(0, int(st.session_state["p14_event_idx"])), len(filtered) - 1
+    )
+
     picker_options = list(range(len(filtered)))
     picker_labels = {i: _label(i) for i in picker_options}
-    sel_idx = st.selectbox(
-        "Select event (case-labelled)",
-        picker_options,
-        format_func=lambda i: picker_labels[i],
-        key="p14_event_select",
-    )
+
+    # Pickbox + Play controls on the same row. The Play controller
+    # cycles the event index through the filtered set; the detail
+    # pane and sky plots re-render on every tick, so the user sees an
+    # event-by-event slideshow of the deployment.
+    playback = importlib.import_module("utils.p3.viz.playback")
+    pick_col, play_col = st.columns([2, 3])
+    with pick_col:
+        sel_idx = st.selectbox(
+            "Select event (case-labelled)",
+            picker_options,
+            index=st.session_state["p14_event_idx"],
+            format_func=lambda i: picker_labels[i],
+            key="p14_event_select",
+        )
+        st.session_state["p14_event_idx"] = int(sel_idx)
+    with play_col:
+        pb = playback.render_play_controls(
+            "p14",
+            label="Event playback",
+            help_text="Cycles through the filtered events. Event details, "
+                      "map, sky plots and verdict all re-render on each tick. "
+                      "Pause to linger on one event.",
+            allowed_speeds=(("1×", 1), ("2×", 2), ("5×", 5), ("10×", 10)),
+            tick_ms=1200,   # deliberately slower than Tracker so details are readable
+        )
+    if pb.playing:
+        new_idx = (st.session_state["p14_event_idx"] + pb.speed_units) % len(filtered)
+        st.session_state["p14_event_idx"] = new_idx
+        sel_idx = new_idx
+
     row = filtered.iloc[sel_idx]
 
     kv_col, map_col = st.columns([1.2, 1])
@@ -385,25 +421,50 @@ with res_col:
 
 
 # ── Correlation ----------------------------------------------------
+# Phase 1 packet versions disagree on the rb1 column name — early
+# decoders ship "RockBLOCK Time", FY25 ships "Prev 1st RB Time", v6.4
+# also varies. Pick whichever exists so the panel is never empty.
 st.subheader("Correlation")
+rb1_col = next(
+    (c for c in ("RockBLOCK Time", "Prev 1st RB Time", "rb1", "RB1")
+     if c in enriched.columns),
+    None,
+)
+gpst_col = next(
+    (c for c in ("GPS Time", "Prev GPS Time", "TTFF")
+     if c in enriched.columns),
+    None,
+)
 sc1, sc2 = st.columns(2)
 with sc1:
-    if "IRI_N_VISIBLE" in enriched.columns and "RockBLOCK Time" in enriched.columns:
+    if rb1_col and "IRI_N_VISIBLE" in enriched.columns:
         st.plotly_chart(
             replay_panels.correlation_scatter(
-                enriched, "IRI_N_VISIBLE", "RockBLOCK Time",
-                title="rb1 vs Iridium visible sats",
+                enriched, "IRI_N_VISIBLE", rb1_col,
+                title=f"{rb1_col} vs Iridium visible sats",
             ),
             use_container_width=True,
         )
+    else:
+        st.caption(
+            "rb1 vs Iridium visible — *unavailable* "
+            f"(missing column: rb1={'OK' if rb1_col else 'no'}, "
+            f"IRI_N_VISIBLE={'OK' if 'IRI_N_VISIBLE' in enriched.columns else 'no'})."
+        )
 with sc2:
-    if "GPS_N_VISIBLE" in enriched.columns and "GPS Time" in enriched.columns:
+    if gpst_col and "GPS_N_VISIBLE" in enriched.columns:
         st.plotly_chart(
             replay_panels.correlation_scatter(
-                enriched, "GPS_N_VISIBLE", "GPS Time",
-                title="TTFF vs GPS visible sats",
+                enriched, "GPS_N_VISIBLE", gpst_col,
+                title=f"{gpst_col} vs GPS visible sats",
             ),
             use_container_width=True,
+        )
+    else:
+        st.caption(
+            "TTFF vs GPS visible — *unavailable* "
+            f"(missing column: GPS Time={'OK' if gpst_col else 'no'}, "
+            f"GPS_N_VISIBLE={'OK' if 'GPS_N_VISIBLE' in enriched.columns else 'no'})."
         )
 
 

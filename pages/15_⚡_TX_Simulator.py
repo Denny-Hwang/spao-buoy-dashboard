@@ -206,24 +206,61 @@ if run or "p15_frames" in st.session_state:
     else:
         k4.metric("TX pass / total", "—")
 
-    # ── Plotly animation ---------------------------------------------
+    # ── Animated sky: mode switch (Polar default | Map overlay) -----
     st.subheader("Animated sky")
-    st.plotly_chart(
-        sim_playback.build_playback_figure(
-            frames_df, min_el_deg=float(min_el),
-            title="Iridium sky — simulated playback",
-        ),
-        use_container_width=True,
+    mode = st.radio(
+        "Visualisation",
+        ("Polar sky plot", "Map overlay"),
+        index=0, horizontal=True, key="p15_anim_mode",
+        help="Polar sky plot — clean top-down view with Plotly's "
+             "built-in Play / Pause. Map overlay — world map with "
+             "satellite sub-points + dashed link lines scrubbed by a "
+             "slider, matching the Tracker page.",
     )
 
-    # ── Slider-synced fallback (map + KPI snapshot) ------------------
-    st.subheader("Synchronised map + snapshot")
     frame_count = kpi["t_idx"].max() + 1 if not kpi.empty else 1
-    if frame_count > 1:
-        f_idx = st.slider("Scrub frame", 0, int(frame_count - 1), 0,
-                          key="p15_scrub")
+
+    if mode == "Polar sky plot":
+        # Original Plotly frames-based animation with its own Play bar.
+        st.plotly_chart(
+            sim_playback.build_playback_figure(
+                frames_df, min_el_deg=float(min_el),
+                title="Iridium sky — simulated playback",
+            ),
+            use_container_width=True,
+        )
+        # Show the slider-driven map BELOW as a supplementary snapshot
+        # so both views are still available to the operator.
+        st.markdown("##### Synchronised map snapshot")
+        if frame_count > 1:
+            f_idx = st.slider("Scrub frame", 0, int(frame_count - 1), 0,
+                              key="p15_scrub")
+        else:
+            f_idx = 0
     else:
-        f_idx = 0
+        # Map-overlay mode: the map IS the animation, advanced by an
+        # autoplay loop tied to the shared Phase 3 playback controller.
+        playback = importlib.import_module("utils.p3.viz.playback")
+        pb = playback.render_play_controls(
+            "p15_map",
+            label="Map playback",
+            help_text="Cycles through simulation frames and re-draws "
+                      "the overlay map on each tick.",
+            allowed_speeds=(("1×", 1), ("5×", 5), ("10×", 10), ("30×", 30)),
+            tick_ms=400,
+        )
+        if "p15_map_scrub" not in st.session_state:
+            st.session_state["p15_map_scrub"] = 0
+        if pb.playing:
+            nxt = (int(st.session_state["p15_map_scrub"]) + pb.speed_units) % max(1, frame_count)
+            st.session_state["p15_map_scrub"] = nxt
+        if frame_count > 1:
+            f_idx = st.slider("Scrub frame", 0, int(frame_count - 1),
+                              int(st.session_state.get("p15_map_scrub", 0)),
+                              key="p15_map_scrub")
+        else:
+            f_idx = 0
+
     snap = kpi[kpi["t_idx"] == f_idx]
     t_snap = snap["t_utc"].iloc[0] if not snap.empty else start_utc
     n_vis = int(snap["n_visible"].iloc[0]) if not snap.empty else 0
