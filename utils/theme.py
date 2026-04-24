@@ -480,43 +480,36 @@ def render_phase3_visibility_toggle() -> None:
 def _inject_phase3_toggle_host_js() -> None:
     """Move the dev-toggle + TZ selector to sit just above the Phase 3 group.
 
-    We use :func:`streamlit.components.v1.html` rather than a raw
-    ``<script>`` inside ``st.markdown`` because Streamlit Cloud
-    sometimes strips inline scripts in markdown under its CSP. The
-    component renders a 0-px iframe that reaches into the parent
-    document via ``window.parent`` — which is allowed on the same
-    origin — to move the element-containers belonging to **both**
-    the Phase 3 dev toggle (anchor + label + checkbox) and the
-    display-TZ selector (anchor + selectbox) into one single host
-    that gets inserted above the Phase 3 nav group.
+    Uses :func:`st.html` with ``unsafe_allow_javascript=True`` on
+    Streamlit 1.50+, falling back to the legacy
+    ``streamlit.components.v1.html`` on older versions. ``st.html``
+    is the replacement Streamlit nudges us toward (the legacy
+    components call logs a deprecation warning on every rerun).
 
-    The script is idempotent and driven by a MutationObserver so it
-    survives Streamlit's reruns.
+    The script runs in the main document so it manipulates the
+    sidebar DOM directly; no ``window.parent`` indirection is needed
+    on the ``st.html`` path.
+
+    Idempotent + MutationObserver-driven so it survives every
+    Streamlit rerun.
     """
-    try:
-        from streamlit.components.v1 import html as _components_html
-    except Exception:  # noqa: BLE001 — unit tests use a streamlit stub
-        return
-    _components_html(
-        """
+    script = """
         <script>
         (function () {
           const TOGGLE_MARKER = 'p3-dev-toggle-anchor';
           const TZ_MARKER = 'p3-tz-selector-anchor';
           const HOST_ID = 'p3-dev-toggle-host';
-          const doc = window.parent.document;
+          // When running via st.components.v1.html the script lives in
+          // an iframe and needs window.parent; when running via st.html
+          // (unsafe_allow_javascript=True) the script is in the main
+          // document. Support both transparently.
+          const doc = (window.parent && window.parent !== window)
+                        ? window.parent.document : document;
 
           function ec(node) {
             return node ? node.closest('[data-testid="element-container"]') : null;
           }
 
-          /**
-           * Returns the element-container for the widget that directly
-           * follows an anchor marker. Pass ``extra`` to also pull in a
-           * label container emitted between the anchor and the widget
-           * (the dev toggle has anchor → label → checkbox; the TZ
-           * selector has anchor → selectbox).
-           */
           function piecesAfter(markerId, extra) {
             const anchor = doc.getElementById(markerId);
             if (!anchor) return null;
@@ -555,9 +548,7 @@ def _inject_phase3_toggle_host_js() -> None:
           }
 
           function adopt(host, nodes) {
-            // Ensure every provided element-container is an in-order
-            // child of the host. Idempotent — safe to re-run.
-            nodes.forEach((n, i) => {
+            nodes.forEach((n) => {
               if (!n) return;
               if (n.parentElement !== host) host.appendChild(n);
             });
@@ -565,17 +556,11 @@ def _inject_phase3_toggle_host_js() -> None:
 
           function rearrange() {
             try {
-              // dev toggle: anchor + label + widget  (3 pieces, extra=true)
-              const togglePieces = piecesAfter(TOGGLE_MARKER, /*extra=*/true);
-              // TZ selector: anchor + widget (2 pieces, extra=false)
-              const tzPieces = piecesAfter(TZ_MARKER, /*extra=*/false);
+              const togglePieces = piecesAfter(TOGGLE_MARKER, true);
+              const tzPieces = piecesAfter(TZ_MARKER, false);
               const phase3Li = locatePhase3Li();
               if ((!togglePieces && !tzPieces) || !phase3Li) return;
               const host = ensureHost();
-              // Order: the anchor element-containers are CSS-hidden
-              // via inject_custom_css, so the visible order becomes
-              //   [dev toggle label → dev toggle widget]
-              //   [TZ selector widget]
               if (togglePieces) adopt(host, togglePieces);
               if (tzPieces) adopt(host, tzPieces);
               if (host.parentElement !== phase3Li.parentElement
@@ -586,17 +571,32 @@ def _inject_phase3_toggle_host_js() -> None:
           }
 
           rearrange();
-          if (window.parent.__p3ToggleObserver) {
-            window.parent.__p3ToggleObserver.disconnect();
-          }
+          const rootWin = (window.parent && window.parent !== window)
+                            ? window.parent : window;
+          if (rootWin.__p3ToggleObserver) rootWin.__p3ToggleObserver.disconnect();
           const obs = new MutationObserver(rearrange);
-          window.parent.__p3ToggleObserver = obs;
+          rootWin.__p3ToggleObserver = obs;
           obs.observe(doc.body, {childList: true, subtree: true});
         })();
         </script>
-        """,
-        height=0,
-    )
+    """
+    # Prefer the new st.html API (Streamlit ≥ 1.50). Fall back to the
+    # legacy components.v1.html only when unavailable so old deploys
+    # keep working.
+    try:
+        import inspect
+        if hasattr(st, "html"):
+            sig = inspect.signature(st.html)
+            if "unsafe_allow_javascript" in sig.parameters:
+                st.html(script, unsafe_allow_javascript=True)
+                return
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from streamlit.components.v1 import html as _components_html
+        _components_html(script, height=0)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def require_phase3_visible() -> None:

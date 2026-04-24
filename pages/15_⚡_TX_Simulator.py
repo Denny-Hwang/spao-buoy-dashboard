@@ -232,24 +232,37 @@ if run or "p15_frames" in st.session_state:
         # World-map animation — Plotly Scattergeo + frames. Speed
         # buttons change frame.duration client-side so 30× is a
         # genuinely faster replay, not a frame skip.
-        map_style = st.radio(
-            "Map style", sim_playback.MAP_STYLE_LABELS,
-            index=0, horizontal=True, key="p15_map_style",
-        )
-        with st.spinner("Composing map frames…"):
-            map_fig = sim_playback.build_map_playback_figure(
-                sats,
-                start_utc=start_utc,
-                duration_h=float(duration_h),
-                lat_deg=float(obs_lat),
-                lon_deg=float(obs_lon),
-                min_el_deg=float(min_el),
-                step_s=float(step_s),
-                style=map_style,
-                height=560,
-                title="Iridium ground tracks — simulated playback",
+        #
+        # Use ``getattr`` so a transient Streamlit Cloud module-cache
+        # desync (old sim_playback still loaded) gives a friendly
+        # error instead of AttributeError mid-render.
+        map_style_labels = getattr(sim_playback, "MAP_STYLE_LABELS", None)
+        build_map_fig = getattr(sim_playback, "build_map_playback_figure", None)
+        if map_style_labels is None or build_map_fig is None:
+            st.error(
+                "Map-overlay animation unavailable — the sim_playback "
+                "module is stale (likely a Streamlit Cloud cache). "
+                "Restart the app or wait for the next redeploy."
             )
-        st.plotly_chart(map_fig, use_container_width=True)
+        else:
+            map_style = st.radio(
+                "Map style", map_style_labels,
+                index=0, horizontal=True, key="p15_map_style",
+            )
+            with st.spinner("Composing map frames…"):
+                map_fig = build_map_fig(
+                    sats,
+                    start_utc=start_utc,
+                    duration_h=float(duration_h),
+                    lat_deg=float(obs_lat),
+                    lon_deg=float(obs_lon),
+                    min_el_deg=float(min_el),
+                    step_s=float(step_s),
+                    style=map_style,
+                    height=560,
+                    title="Iridium ground tracks — simulated playback",
+                )
+            st.plotly_chart(map_fig, use_container_width=True)
 
     # ── Static snapshot summary (below the animation) --------------
     st.markdown("##### Snapshot inspector")
