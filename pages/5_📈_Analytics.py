@@ -203,22 +203,25 @@ def _render_binned_battery_temp(
     if time_col and work[time_col].notna().any():
         data_min = work[time_col].min()
         data_max = work[time_col].max()
+        # Seed session_state once per key so the widget doesn't hit
+        # Streamlit's "widget has a default set by session_state AND a
+        # value= argument" warning on every rerun.
+        for k, v in (
+            ("binned_start", data_min.date()),
+            ("binned_start_t", time(0, 0)),
+            ("binned_end", data_max.date()),
+            ("binned_end_t", time(23, 59)),
+        ):
+            if k not in st.session_state:
+                st.session_state[k] = v
         with ctrl_cols[0]:
-            bstart = st.date_input(
-                "Start", value=data_min.date(), key="binned_start"
-            )
+            bstart = st.date_input("Start", key="binned_start")
         with ctrl_cols[1]:
-            bstart_t = st.time_input(
-                "Start time", value=time(0, 0), key="binned_start_t"
-            )
+            bstart_t = st.time_input("Start time", key="binned_start_t")
         with ctrl_cols[2]:
-            bend = st.date_input(
-                "End", value=data_max.date(), key="binned_end"
-            )
+            bend = st.date_input("End", key="binned_end")
         with ctrl_cols[3]:
-            bend_t = st.time_input(
-                "End time", value=time(23, 59), key="binned_end_t"
-            )
+            bend_t = st.time_input("End time", key="binned_end_t")
         start_dt = datetime.combine(bstart, bstart_t)
         end_dt = datetime.combine(bend, bend_t)
         mask = (work[time_col] >= pd.Timestamp(start_dt)) & (
@@ -422,14 +425,18 @@ def render_analytics():
                 st.session_state["viz_end_time"] = time(23, 59)
 
             c1, c2, c3, c4 = st.columns(4)
+            # Session state for these keys is seeded above on device-
+            # selection change, so do NOT pass ``value=`` here — doing
+            # both triggers Streamlit's check_session_state_rules
+            # warning ("Creating widget with key … and a default value").
             with c1:
-                start = st.date_input("Start", value=data_min.date(), key="viz_start")
+                start = st.date_input("Start", key="viz_start")
             with c2:
-                start_t = st.time_input("Start time", value=time(0, 0), key="viz_start_time")
+                start_t = st.time_input("Start time", key="viz_start_time")
             with c3:
-                end = st.date_input("End", value=data_max.date(), key="viz_end")
+                end = st.date_input("End", key="viz_end")
             with c4:
-                end_t = st.time_input("End time", value=time(23, 59), key="viz_end_time")
+                end_t = st.time_input("End time", key="viz_end_time")
             start_dt = datetime.combine(start, start_t)
             end_dt = datetime.combine(end, end_t)
             mask = (all_df[time_col] >= pd.Timestamp(start_dt)) & (all_df[time_col] <= pd.Timestamp(end_dt)) | all_df[time_col].isna()
