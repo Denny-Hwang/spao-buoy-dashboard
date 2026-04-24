@@ -249,18 +249,23 @@ anim_mode = st.radio(
          "satellite sub-points and connection lines. Both share the "
          "same frame set and play via Plotly's native Play button.",
 )
-if anim_mode == "Polar sky plot":
+# Defensive attribute access — a stale sim_playback module (Streamlit
+# Cloud module cache) must not blow up the page with AttributeError.
+build_polar_fig = getattr(sim_playback, "build_playback_figure", None)
+build_map_fig = getattr(sim_playback, "build_map_playback_figure", None)
+
+if anim_mode == "Polar sky plot" and build_polar_fig is not None:
     st.plotly_chart(
-        sim_playback.build_playback_figure(
+        build_polar_fig(
             anim_frames, min_el_deg=float(min_el),
             title="Iridium sky — live orbit playback",
             height=520,
         ),
         use_container_width=True,
     )
-else:
+elif anim_mode == "Map overlay" and build_map_fig is not None:
     st.plotly_chart(
-        sim_playback.build_map_playback_figure(
+        build_map_fig(
             sats,
             start_utc=dt,
             duration_h=float(anim_win_h),
@@ -268,11 +273,22 @@ else:
             lon_deg=float(obs_lon),
             min_el_deg=float(min_el),
             step_s=float(anim_step_s),
-            style=tile_choice,
+            # Map-playback module has its own (Satellite/Terrain/Dark)
+            # palette — the Folium tile name is a close enough match,
+            # so fall back to "Satellite" when the user picked a tile
+            # we don't have a Plotly palette for.
+            style=tile_choice if tile_choice in
+                  getattr(sim_playback, "MAP_STYLE_LABELS", ("Satellite",))
+                  else "Satellite",
             height=560,
             title="Iridium ground tracks — live orbit playback",
         ),
         use_container_width=True,
+    )
+else:
+    st.warning(
+        "Animated playback unavailable — the sim_playback module "
+        "appears stale (Streamlit Cloud module cache). Restart the app."
     )
 
 
