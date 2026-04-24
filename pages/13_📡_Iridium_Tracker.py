@@ -45,12 +45,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Sidebar controls (Phase 3 toggle + TZ selector).
-try:
-    _flag = importlib.import_module("utils.p3.__phase3_flag")
-    _flag.render_sidebar_controls()
-except Exception as exc:  # noqa: BLE001
-    st.sidebar.caption(f"Phase 3 controls unavailable: {exc}")
+# Sidebar controls (Phase 3 per-page TZ selector). The visibility
+# toggle is owned by ``render_sidebar`` above.
+from utils.p3 import __phase3_flag as _flag  # noqa: E402
+_flag.render_sidebar_controls()
 
 # ── Phase 3 modules -------------------------------------------------
 try:

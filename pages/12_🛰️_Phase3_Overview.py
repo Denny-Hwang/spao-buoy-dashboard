@@ -29,12 +29,10 @@ render_sidebar()
 render_header()
 require_phase3_visible()
 
-# Phase 3 sidebar (enable toggle + TZ selector).
-try:
-    _flag = importlib.import_module("utils.p3.__phase3_flag")
-    _flag.render_sidebar_controls()
-except Exception as exc:  # noqa: BLE001
-    st.sidebar.caption(f"Phase 3 controls unavailable: {exc}")
+# Phase 3 per-page sidebar (TZ selector). The visibility toggle is
+# owned by ``render_sidebar`` above, so we only add the display-TZ.
+from utils.p3 import __phase3_flag as _flag  # noqa: E402
+_flag.render_sidebar_controls()
 
 
 st.markdown(

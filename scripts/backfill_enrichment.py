@@ -462,6 +462,7 @@ def enrich_open_meteo_marine(
             if hour not in frame.index:
                 continue
             row = frame.loc[hour]
+            sst_val = row.get("sea_surface_temperature")
             _set_cells(df, [idx], {
                 "WAVE_H_cm": row.get("wave_height"),
                 "WAVE_T_ds": row.get("wave_period"),
@@ -472,9 +473,18 @@ def enrich_open_meteo_marine(
                 # only populated opportunistically — if NOAA OISST,
                 # MUR or OSTIA later fill their own columns, those
                 # stay the authoritative reference for B1/B2/B3 stats.
-                "SAT_SST_ERA5_cC": row.get("sea_surface_temperature"),
+                "SAT_SST_ERA5_cC": sst_val,
             })
-            _or_flag(df, [idx], EnrichFlag.WAVE)
+            # Always mark WAVE. Only mark ERA5_SST when the marine call
+            # actually delivered a finite SST, so downstream bit checks
+            # reflect real data rather than "we tried".
+            flag_bits = EnrichFlag.WAVE
+            try:
+                if sst_val is not None and not math.isnan(float(sst_val)):
+                    flag_bits |= EnrichFlag.ERA5_SST
+            except (TypeError, ValueError):
+                pass
+            _or_flag(df, [idx], flag_bits)
             filled += 1
     return filled
 
@@ -637,21 +647,29 @@ def enrich_ostia(
 SOURCE_DISPATCH: dict[str, Callable] = {}
 
 
+def _erddap_source(fetch: Callable, column: str, flag_bit: EnrichFlag) -> Callable:
+    """Return a positional-arg dispatcher bound to an ERDDAP fetcher.
+
+    functools.partial over keyword args keeps static analysis happy (no
+    loop-captured lambdas) and gives a stable ``__name__`` in tracebacks.
+    """
+    def _dispatch(df, rows, ts, la, lo):
+        return enrich_erddap_point(df, rows, ts, la, lo, fetch, column, flag_bit)
+    _dispatch.__name__ = f"enrich_erddap_{column}"
+    return _dispatch
+
+
 def _register_default_dispatch() -> None:
     from utils.p2.sources.erddap import fetch_mur_sst_point, fetch_oisst_point
 
     SOURCE_DISPATCH["open_meteo_marine"] = enrich_open_meteo_marine
     SOURCE_DISPATCH["open_meteo_historical"] = enrich_open_meteo_historical
     SOURCE_DISPATCH["open_meteo_sst"] = enrich_open_meteo_sst
-    SOURCE_DISPATCH["noaa_oisst"] = (
-        lambda df, rows, ts, la, lo: enrich_erddap_point(
-            df, rows, ts, la, lo, fetch_oisst_point, "SAT_SST_OISST_cC", EnrichFlag.OISST
-        )
+    SOURCE_DISPATCH["noaa_oisst"] = _erddap_source(
+        fetch_oisst_point, "SAT_SST_OISST_cC", EnrichFlag.OISST
     )
-    SOURCE_DISPATCH["mur_sst"] = (
-        lambda df, rows, ts, la, lo: enrich_erddap_point(
-            df, rows, ts, la, lo, fetch_mur_sst_point, "SAT_SST_MUR_cC", EnrichFlag.MUR
-        )
+    SOURCE_DISPATCH["mur_sst"] = _erddap_source(
+        fetch_mur_sst_point, "SAT_SST_MUR_cC", EnrichFlag.MUR
     )
     SOURCE_DISPATCH["oscar"] = enrich_oscar
     SOURCE_DISPATCH["ostia"] = enrich_ostia
@@ -752,6 +770,7 @@ def main(argv: list[str] | None = None) -> int:
         window = filter_by_window(df, ts_col, args.start_date, args.end_date)
 
         total_stats: dict[str, int] = {}
+        source_errors: dict[str, str] = {}
         affected_columns: set[str] = set()
         for src in requested:
             bit = SOURCE_FLAG_BITS[src]
@@ -763,7 +782,16 @@ def main(argv: list[str] | None = None) -> int:
                 stats["groups"] = len(groups)
                 print(f"[dry-run] {tab}/{src}: would fetch {len(groups)} groups for {len(cand)} rows")
             else:
-                filled = SOURCE_DISPATCH[src](df, cand, ts_col, lat_col, lon_col)
+                # Isolate per-source failures so one broken fetcher
+                # (network blip, Copernicus auth, xarray decode) cannot
+                # drop the already-enriched cells from the other sources
+                # before we reach the Sheets write below.
+                try:
+                    filled = SOURCE_DISPATCH[src](df, cand, ts_col, lat_col, lon_col)
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("source %s failed on tab %s", src, tab)
+                    source_errors[src] = f"{type(exc).__name__}: {exc}"
+                    filled = 0
                 stats["filled"] = filled
                 affected_columns.update(SOURCE_COLUMNS.get(src, []))
                 if filled:
@@ -773,6 +801,10 @@ def main(argv: list[str] | None = None) -> int:
             grand_totals[src] += value
 
         print_summary(f"enrichment stats ({tab})", total_stats)
+        if source_errors:
+            print(f"[warn] {tab}: per-source failures:")
+            for src, msg in source_errors.items():
+                print(f"  {src}: {msg}")
 
         if args.dry_run:
             continue

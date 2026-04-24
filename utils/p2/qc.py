@@ -14,11 +14,12 @@ Current checks:
 
 from __future__ import annotations
 
-import math
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
+
+from .physics.geom import haversine_km
 
 
 BUOY_SST_ALIASES = ("SST_buoy", "sst_buoy", "SST", "Water Temp", "Water_Temp")
@@ -28,8 +29,6 @@ WIND_ALIASES = ("U10", "WIND_SPD_cms", "WIND_SPD_mps", "Wind_Speed")
 LAT_ALIASES = ("Lat", "Latitude", "lat", "GPS Lat")
 LON_ALIASES = ("Lon", "Lng", "Longitude", "lon", "GPS Lon")
 TS_ALIASES = ("Timestamp", "Receive Time", "time", "Time")
-
-EARTH_RADIUS_M = 6_371_000.0
 
 SST_DELTA_LIMIT_C = 3.0
 WAVE_H_LIMIT_M = 15.0
@@ -92,16 +91,6 @@ def check_wind_speed(df: pd.DataFrame) -> pd.Series:
     return _to_mps(df[col], col) > WIND_LIMIT_MPS
 
 
-def _haversine_km(lat1, lon1, lat2, lon2) -> float:
-    rlat1 = math.radians(lat1)
-    rlat2 = math.radians(lat2)
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2)
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(max(0.0, min(1.0, a)))) / 1000.0
-
-
 def check_gps_speed(df: pd.DataFrame) -> pd.Series:
     lat_col = _first(df, LAT_ALIASES)
     lon_col = _first(df, LON_ALIASES)
@@ -119,7 +108,7 @@ def check_gps_speed(df: pd.DataFrame) -> pd.Series:
         dt = (ts.iloc[i] - ts.iloc[i - 1]).total_seconds()
         if not dt or dt <= 0:
             continue
-        dist_km = _haversine_km(lat[i - 1], lon[i - 1], lat[i], lon[i])
+        dist_km = haversine_km(lat[i - 1], lon[i - 1], lat[i], lon[i])
         kmh = dist_km / (dt / 3600.0)
         if kmh > GPS_SPEED_LIMIT_KMH:
             flags[i] = True
