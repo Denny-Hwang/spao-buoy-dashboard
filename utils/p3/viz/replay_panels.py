@@ -226,20 +226,41 @@ def gnss_timeout_sweep(df: pd.DataFrame, cutoff_s: float,
     failure. Failed rows in the source data are assumed to succeed at
     ``gps_fallback_ttff`` seconds if ``cutoff_s >= 35`` (i.e. the
     historical cold-start would have finished in ~38 s).
+
+    Robust column access
+    --------------------
+    The previous implementation used ``df.get("GPS Time", pd.Series())``
+    which returns an *empty* Series when the column is missing — its
+    index is empty, so later ``fail_col.loc[idx]`` raised ``KeyError``
+    on Python 3.14 pandas. We now check column existence up front and
+    iterate via :meth:`DataFrame.itertuples`, so missing-column and
+    mismatched-index frames both degrade gracefully.
     """
     if df is None or df.empty:
         return dict(cutoff_s=cutoff_s, n=0, would_fail=0,
                     fail_rate=0.0, mean_ttff=0.0,
                     mean_energy_j=0.0)
+    has_valid = "GPS Valid" in df.columns
+    has_time = "GPS Time" in df.columns
     n = len(df)
     would_fail = 0
     total_ttff = 0.0
-    gps_t = pd.to_numeric(df.get("GPS Time", pd.Series(dtype=float)),
-                          errors="coerce")
-    fail_col = df.get("GPS Valid", pd.Series(dtype=str)).astype(str).str.upper()
-    for idx in df.index:
-        is_fail_now = str(fail_col.loc[idx]) == "NO"
-        gt = gps_t.loc[idx] if idx in gps_t.index else float("nan")
+
+    # Build coerced views aligned to the frame's own index.
+    if has_valid:
+        fail_view = df["GPS Valid"].astype(str).str.upper().reindex(df.index)
+    else:
+        fail_view = pd.Series("YES", index=df.index)
+    if has_time:
+        gt_view = pd.to_numeric(df["GPS Time"], errors="coerce").reindex(df.index)
+    else:
+        gt_view = pd.Series(float("nan"), index=df.index)
+
+    # Iterate positionally so we never touch .loc — avoids any lingering
+    # non-unique-index pitfalls with user-supplied Phase 1 frames.
+    for i in range(n):
+        is_fail_now = str(fail_view.iat[i]) == "NO"
+        gt = gt_view.iat[i]
         if is_fail_now:
             if cutoff_s >= 35:
                 eff = gps_fallback_ttff

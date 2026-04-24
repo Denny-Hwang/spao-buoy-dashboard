@@ -187,30 +187,41 @@ def _cached(fn):
         return fn
 
 
-# NOTE: Streamlit 1.40+ raises ``UnserializableReturnValueError`` if a
-# cached function returns objects it can't pickle cleanly. ``Sat``
-# contains an ``sgp4.api.Satrec`` C-extension object that does not
-# round-trip through Streamlit's cache serializer. To keep caching
-# benefits while staying portable we cache the **raw record dicts**
-# (plain ``{name, line1, line2}``) and call :func:`parse_tle` on each
-# read. Parsing ~80 TLEs is sub-10 ms so this is effectively free.
-def _df_to_records(df):
-    """Turn a tab DataFrame into picklable ``{name, line1, line2}`` dicts."""
+# NOTE: Streamlit 1.40+ on Python 3.14 raises
+# ``UnserializableReturnValueError`` if a cached function returns *any*
+# value whose pickle round-trip is not lossless. Earlier iterations of
+# this module returned ``list[Sat]`` (failed because ``sgp4.api.Satrec``
+# is a C extension) and then ``list[dict]`` from ``DataFrame.to_dict``
+# (failed because pandas can embed numpy scalar types the strict
+# serializer flags). The bulletproof choice is to cache a **plain
+# ``str``** — the full 3-line TLE text — and re-parse on every call.
+# String pickling is trivial across every Streamlit / Python version,
+# and parsing ~80 TLEs via :func:`parse_tle_text` is sub-10 ms.
+def _df_to_tle_text(df) -> str:
+    """Return the DataFrame's TLE columns joined into a 3-line text dump."""
     if df is None or df.empty:
-        return []
-    return df[["satname", "line1", "line2"]].rename(
-        columns={"satname": "name"}
-    ).to_dict("records")
+        return ""
+    out: list[str] = []
+    for _, row in df.iterrows():
+        name = str(row.get("satname", "") or "").strip()
+        l1 = str(row.get("line1", "") or "").strip()
+        l2 = str(row.get("line2", "") or "").strip()
+        if not l1 or not l2:
+            continue
+        out.append(name or f"SAT-{l1[2:7].strip()}")
+        out.append(l1)
+        out.append(l2)
+    return "\n".join(out)
 
 
 @_cached
-def _load_iridium_records_cached(sheet_id: str | None = None) -> list[dict]:
-    return _df_to_records(_read_tab(TAB_IRIDIUM, sheet_id))
+def _load_iridium_text_cached(sheet_id: str | None = None) -> str:
+    return _df_to_tle_text(_read_tab(TAB_IRIDIUM, sheet_id))
 
 
 @_cached
-def _load_gps_records_cached(sheet_id: str | None = None) -> list[dict]:
-    return _df_to_records(_read_tab(TAB_GPS, sheet_id))
+def _load_gps_text_cached(sheet_id: str | None = None) -> str:
+    return _df_to_tle_text(_read_tab(TAB_GPS, sheet_id))
 
 
 def _drop_cache(fn) -> None:
@@ -226,38 +237,30 @@ def _drop_cache(fn) -> None:
 def load_iridium_tle(sheet_id: str | None = None) -> list[Sat]:
     """Return parsed Iridium satellites from the ``_iridium_tle`` tab.
 
-    Empty results are deliberately *not* cached: when the cron has not
-    yet populated the sheet (or the read transiently fails) we don't
-    want to lock the page into "no data" for the full 1 h TTL. The
-    next call after the cron writes will see fresh data.
-
-    The cache stores picklable record dicts; the SGP4 ``Satrec`` records
-    are reconstructed on every call via :func:`parse_tle`.
+    Empty / missing tabs are not cached: the 1 h TTL would otherwise
+    lock the page into "no data" for an hour once the cron finally
+    populates the sheet.
     """
-    records = _load_iridium_records_cached(sheet_id)
-    if not records:
-        _drop_cache(_load_iridium_records_cached)
+    text = _load_iridium_text_cached(sheet_id)
+    if not text:
+        _drop_cache(_load_iridium_text_cached)
         return []
-    return parse_tle(records)
+    return parse_tle(parse_tle_text(text))
 
 
 def load_gps_tle(sheet_id: str | None = None) -> list[Sat]:
     """Return parsed GPS satellites — same empty-skip semantics as Iridium."""
-    records = _load_gps_records_cached(sheet_id)
-    if not records:
-        _drop_cache(_load_gps_records_cached)
+    text = _load_gps_text_cached(sheet_id)
+    if not text:
+        _drop_cache(_load_gps_text_cached)
         return []
-    return parse_tle(records)
+    return parse_tle(parse_tle_text(text))
 
 
 def force_refresh_tle() -> None:
-    """Clear both TLE caches so the next call re-reads the Sheet.
-
-    Used by the ``Refresh TLE`` button on the Tracker / Field Replay
-    pages so operators can pull data immediately after the cron runs.
-    """
-    _drop_cache(_load_iridium_records_cached)
-    _drop_cache(_load_gps_records_cached)
+    """Clear both TLE caches so the next call re-reads the Sheet."""
+    _drop_cache(_load_iridium_text_cached)
+    _drop_cache(_load_gps_text_cached)
 
 
 def _health_from_sats(tab: str, sats: list[Sat],

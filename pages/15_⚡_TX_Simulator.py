@@ -239,34 +239,30 @@ if run or "p15_frames" in st.session_state:
               f"{best_el_snap:.1f}° / {best_margin_snap:.1f} dB"
               if best_el_snap is not None and pd.notna(best_el_snap) else "—")
 
-    # Folium snapshot at the scrubbed instant.
+    # Folium snapshot at the scrubbed instant — HTML-prototype-style
+    # overlay: observer + visible sat sub-points + connection lines +
+    # horizon ring, on a satellite tile by default.
     try:
-        import folium
         from streamlit_folium import st_folium
-        m = folium.Map(location=[obs_lat, obs_lon], zoom_start=3,
-                       tiles="CartoDB dark_matter", attr="CartoDB")
-        folium.CircleMarker(
-            [obs_lat, obs_lon], radius=6, color="#C62828",
-            fill=True, fill_color="#C62828", popup="Observer",
-        ).add_to(m)
+        from utils.p3.viz import map_overlay as overlay  # lazy import
         if isinstance(t_snap, pd.Timestamp):
             dt_snap = t_snap.to_pydatetime()
         else:
             dt_snap = pd.Timestamp(t_snap, tz="UTC").to_pydatetime()
-        for s in sats:
-            sub = sgp4_engine.sat_subpoint(s, dt_snap)
-            if sub is None:
-                continue
-            la, lo, _alt = sub
-            look = sgp4_engine.look_angles(s, dt_snap, obs_lat, obs_lon)
-            if look is None or look.el_deg <= min_el:
-                continue
-            folium.CircleMarker(
-                [la, lo], radius=4, color="#0078D4", fill=True,
-                fill_color="#0078D4",
-                popup=f"{s.name} el={look.el_deg:.1f}°",
-            ).add_to(m)
-        st_folium(m, height=360, use_container_width=True,
+        tile_choice = st.radio(
+            "Map tile", overlay.TILE_LABELS,
+            index=0, horizontal=True, key="p15_tile",
+        )
+        m = overlay.build_overlay_map(
+            observer_lat=float(obs_lat),
+            observer_lon=float(obs_lon),
+            dt=dt_snap,
+            iridium_sats=sats,
+            min_el_deg=float(min_el),
+            tile=tile_choice,
+            zoom_start=3,
+        )
+        st_folium(m, height=420, use_container_width=True,
                   returned_objects=[])
     except Exception as exc:  # noqa: BLE001
         st.caption(f"Map unavailable: {exc}")
