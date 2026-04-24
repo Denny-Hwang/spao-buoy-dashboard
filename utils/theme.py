@@ -229,18 +229,35 @@ def inject_custom_css():
         z-index: 999;
     }
 
-    /* ── Phase 3 dev toggle — host inside the Phase 3 section ──
-       The ``<div id="p3-dev-toggle-anchor">`` marker is hidden; a small
-       script in :func:`render_phase3_visibility_toggle` moves the toggle
-       DOM node to sit right ABOVE the Phase 3 banner in the sidebar
-       nav, so it visually belongs to the Phase 3 group. */
-    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor) {
+    /* ── Phase 3 dev toggle + TZ selector — host above Phase 3 nav ──
+       Both widgets render inside ``stSidebarUserContent`` (at the top
+       of the sidebar) as Streamlit requires, then a script in
+       :mod:`utils.theme._inject_phase3_toggle_host_js` relocates their
+       DOM nodes into ``#p3-dev-toggle-host`` which is inserted right
+       above the Phase 3 ``<li>`` in the nav. Until the move happens,
+       the anchor containers are hidden so nothing flashes at the top
+       of the sidebar. */
+    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-dev-toggle-anchor),
+    section[data-testid="stSidebar"] [data-testid="element-container"]:has(#p3-tz-selector-anchor) {
         display: none !important;
     }
-    /* Visual framing for the toggle AFTER the JS has moved it into the nav. */
+    /* During the brief window before the JS moves them, the label +
+       widget containers that FOLLOW the anchor are also hidden so
+       users never see them flash at the top of the sidebar. Once the
+       JS has adopted them into ``#p3-dev-toggle-host``, the host's
+       own CSS rule below reveals them. */
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
+      [data-testid="element-container"]:has(#p3-dev-toggle-anchor) ~ [data-testid="element-container"] {
+        /* no-op — Streamlit's own styles already show these, so we do
+           not want to hide them system-wide. The host move runs on
+           MutationObserver and completes within a single frame. */
+    }
+
+    /* Visual framing for the host block once it has been moved. */
     #p3-dev-toggle-host {
-        padding: 6px 10px 8px 10px;
-        margin-top: 10px;
+        display: block;
+        padding: 8px 10px 10px 10px;
+        margin: 8px 0 10px 0;
         background: #f8f8f8;
         border-top: 1px dashed #DEDEDE;
         border-bottom: 1px dashed #DEDEDE;
@@ -252,6 +269,9 @@ def inject_custom_css():
         color: #5A5A5A;
         display: block;
         margin-bottom: 4px;
+    }
+    #p3-dev-toggle-host [data-testid="element-container"] {
+        margin-bottom: 4px !important;
     }
     .sidebar-footer p {
         color: #5A5A5A;
@@ -458,15 +478,17 @@ def render_phase3_visibility_toggle() -> None:
 
 
 def _inject_phase3_toggle_host_js() -> None:
-    """Move the dev-toggle DOM to sit just above the Phase 3 group.
+    """Move the dev-toggle + TZ selector to sit just above the Phase 3 group.
 
     We use :func:`streamlit.components.v1.html` rather than a raw
     ``<script>`` inside ``st.markdown`` because Streamlit Cloud
     sometimes strips inline scripts in markdown under its CSP. The
     component renders a 0-px iframe that reaches into the parent
     document via ``window.parent`` — which is allowed on the same
-    origin — to move our three element-containers (anchor, label,
-    widget) into the Phase 3 nav position.
+    origin — to move the element-containers belonging to **both**
+    the Phase 3 dev toggle (anchor + label + checkbox) and the
+    display-TZ selector (anchor + selectbox) into one single host
+    that gets inserted above the Phase 3 nav group.
 
     The script is idempotent and driven by a MutationObserver so it
     survives Streamlit's reruns.
@@ -479,23 +501,37 @@ def _inject_phase3_toggle_host_js() -> None:
         """
         <script>
         (function () {
-          const MARKER_ID = 'p3-dev-toggle-anchor';
+          const TOGGLE_MARKER = 'p3-dev-toggle-anchor';
+          const TZ_MARKER = 'p3-tz-selector-anchor';
           const HOST_ID = 'p3-dev-toggle-host';
           const doc = window.parent.document;
 
-          function elementContainerFor(node) {
+          function ec(node) {
             return node ? node.closest('[data-testid="element-container"]') : null;
           }
 
-          function locateTogglePieces() {
-            const anchor = doc.getElementById(MARKER_ID);
+          /**
+           * Returns the element-container for the widget that directly
+           * follows an anchor marker. Pass ``extra`` to also pull in a
+           * label container emitted between the anchor and the widget
+           * (the dev toggle has anchor → label → checkbox; the TZ
+           * selector has anchor → selectbox).
+           */
+          function piecesAfter(markerId, extra) {
+            const anchor = doc.getElementById(markerId);
             if (!anchor) return null;
-            const anchorCont = elementContainerFor(anchor);
+            const anchorCont = ec(anchor);
             if (!anchorCont) return null;
-            const labelCont = anchorCont.nextElementSibling;
-            const widgetCont = labelCont ? labelCont.nextElementSibling : null;
-            if (!labelCont || !widgetCont) return null;
-            return {anchorCont, labelCont, widgetCont};
+            let sib = anchorCont.nextElementSibling;
+            const pieces = [anchorCont];
+            if (extra) {
+              if (!sib) return null;
+              pieces.push(sib);
+              sib = sib.nextElementSibling;
+            }
+            if (!sib) return null;
+            pieces.push(sib);
+            return pieces;
           }
 
           function locatePhase3Li() {
@@ -509,30 +545,39 @@ def _inject_phase3_toggle_host_js() -> None:
             return null;
           }
 
-          function ensureHost(pieces) {
+          function ensureHost() {
             let host = doc.getElementById(HOST_ID);
             if (!host) {
               host = doc.createElement('div');
               host.id = HOST_ID;
-              host.appendChild(pieces.labelCont);
-              host.appendChild(pieces.widgetCont);
-            } else {
-              if (pieces.labelCont.parentElement !== host) {
-                host.insertBefore(pieces.labelCont, host.firstChild);
-              }
-              if (pieces.widgetCont.parentElement !== host) {
-                host.appendChild(pieces.widgetCont);
-              }
             }
             return host;
           }
 
+          function adopt(host, nodes) {
+            // Ensure every provided element-container is an in-order
+            // child of the host. Idempotent — safe to re-run.
+            nodes.forEach((n, i) => {
+              if (!n) return;
+              if (n.parentElement !== host) host.appendChild(n);
+            });
+          }
+
           function rearrange() {
             try {
-              const pieces = locateTogglePieces();
+              // dev toggle: anchor + label + widget  (3 pieces, extra=true)
+              const togglePieces = piecesAfter(TOGGLE_MARKER, /*extra=*/true);
+              // TZ selector: anchor + widget (2 pieces, extra=false)
+              const tzPieces = piecesAfter(TZ_MARKER, /*extra=*/false);
               const phase3Li = locatePhase3Li();
-              if (!pieces || !phase3Li) return;
-              const host = ensureHost(pieces);
+              if ((!togglePieces && !tzPieces) || !phase3Li) return;
+              const host = ensureHost();
+              // Order: the anchor element-containers are CSS-hidden
+              // via inject_custom_css, so the visible order becomes
+              //   [dev toggle label → dev toggle widget]
+              //   [TZ selector widget]
+              if (togglePieces) adopt(host, togglePieces);
+              if (tzPieces) adopt(host, tzPieces);
               if (host.parentElement !== phase3Li.parentElement
                   || host.nextSibling !== phase3Li) {
                 phase3Li.parentElement.insertBefore(host, phase3Li);
@@ -541,7 +586,6 @@ def _inject_phase3_toggle_host_js() -> None:
           }
 
           rearrange();
-          // Re-apply on every DOM change so the move survives Streamlit reruns.
           if (window.parent.__p3ToggleObserver) {
             window.parent.__p3ToggleObserver.disconnect();
           }

@@ -65,6 +65,14 @@ def render_tz_selector_in_sidebar() -> str:
     :data:`TZ_PRESETS` tuple; if a user previously typed a custom zone
     that is not in the preset list, we show it as the first option so
     nothing is silently overwritten.
+
+    Marker
+    ------
+    The ``<div id="p3-tz-selector-anchor">`` right before the
+    selectbox lets the sidebar-relocation JS in
+    :mod:`utils.theme` move the selector DOM node into the same host
+    that holds the Phase 3 developer toggle, so both controls end up
+    as one visual block right above the Phase 3 nav group.
     """
     if _st is None:
         return DEFAULT_TZ
@@ -75,6 +83,10 @@ def render_tz_selector_in_sidebar() -> str:
         options = [current, *options]
 
     idx = options.index(current)
+    _st.sidebar.markdown(
+        '<div id="p3-tz-selector-anchor"></div>',
+        unsafe_allow_html=True,
+    )
     choice = _st.sidebar.selectbox(
         "Display TZ (UTC is always shown)",
         options,

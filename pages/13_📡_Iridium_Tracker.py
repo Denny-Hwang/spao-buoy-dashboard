@@ -116,12 +116,38 @@ if "p13_time" not in st.session_state:
 
 def _set_now():
     st.session_state["p13_time"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    # reset scrub to 0 so "Now" means the wall-clock instant.
+    st.session_state["p13_scrub"] = 0
 
 t1, t2, t3 = st.columns([2, 1, 1])
 t1.text_input("UTC timestamp", key="p13_time",
               help="UTC in YYYY-MM-DD HH:MM. Click Now to jump to the current instant.")
 t2.button("Now (UTC)", key="p13_now", on_click=_set_now)
-scrub_minutes = t3.slider("Scrub (± minutes)", -30, 30, 0, key="p13_scrub")
+# Widened scrub range so autoplay at 60× / 300× has somewhere to travel
+# without immediately wrapping: ±180 min covers ~1.8 Iridium orbits.
+t3.slider("Scrub (± minutes)", -180, 180, 0, key="p13_scrub")
+
+# ── Playback controls (Play / Pause + speed) ------------------------
+# Reuse the shared Phase 3 playback controller so the UX is identical
+# across Tracker / Field Replay / TX Simulator.
+playback = importlib.import_module("utils.p3.viz.playback")
+pb = playback.render_play_controls(
+    "p13",
+    label="Scrub playback",
+    help_text="Auto-advances the scrub slider. Speed multiplies minutes "
+              "of simulated time per ~0.5 s tick — 60× ≈ 30 s of real "
+              "orbit motion per tick.",
+)
+if pb.playing:
+    # speed_units is "minutes per tick" on the Tracker because the
+    # scrubbing unit is minutes.
+    _cur = int(st.session_state.get("p13_scrub", 0))
+    _nxt = _cur + pb.speed_units
+    if _nxt > 180:
+        _nxt = -180  # wrap around so playback doesn't dead-end
+    st.session_state["p13_scrub"] = _nxt
+
+scrub_minutes = int(st.session_state.get("p13_scrub", 0))
 
 try:
     base_dt = pd.to_datetime(st.session_state["p13_time"],
