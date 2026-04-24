@@ -114,36 +114,20 @@ if "p13_time" not in st.session_state:
 
 def _set_now():
     st.session_state["p13_time"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    # reset scrub to 0 so "Now" means the wall-clock instant.
+    # Also reset the manual scrub so "Now" means the wall-clock instant.
+    # Setting this here is safe because the callback runs BEFORE the
+    # widget is re-instantiated on the next rerun.
     st.session_state["p13_scrub"] = 0
 
 t1, t2, t3 = st.columns([2, 1, 1])
 t1.text_input("UTC timestamp", key="p13_time",
               help="UTC in YYYY-MM-DD HH:MM. Click Now to jump to the current instant.")
 t2.button("Now (UTC)", key="p13_now", on_click=_set_now)
-# Widened scrub range so autoplay at 60× / 300× has somewhere to travel
-# without immediately wrapping: ±180 min covers ~1.8 Iridium orbits.
+# Manual scrub for precise positioning. Smooth playback happens in
+# the animated sky section below via Plotly's own Play button —
+# server-side autorefresh was removed because it caused flicker and
+# frame-skip at high speed multipliers.
 t3.slider("Scrub (± minutes)", -180, 180, 0, key="p13_scrub")
-
-# ── Playback controls (Play / Pause + speed) ------------------------
-# Reuse the shared Phase 3 playback controller so the UX is identical
-# across Tracker / Field Replay / TX Simulator.
-playback = importlib.import_module("utils.p3.viz.playback")
-pb = playback.render_play_controls(
-    "p13",
-    label="Scrub playback",
-    help_text="Auto-advances the scrub slider. Speed multiplies minutes "
-              "of simulated time per ~0.5 s tick — 60× ≈ 30 s of real "
-              "orbit motion per tick.",
-)
-if pb.playing:
-    # speed_units is "minutes per tick" on the Tracker because the
-    # scrubbing unit is minutes.
-    _cur = int(st.session_state.get("p13_scrub", 0))
-    _nxt = _cur + pb.speed_units
-    if _nxt > 180:
-        _nxt = -180  # wrap around so playback doesn't dead-end
-    st.session_state["p13_scrub"] = _nxt
 
 scrub_minutes = int(st.session_state.get("p13_scrub", 0))
 
@@ -224,6 +208,72 @@ st.dataframe(
     height=260,
     use_container_width=True,
 )
+
+
+# ── Animated playback (client-side Plotly, smooth at any speed) -----
+# Built with Plotly's own frames engine so Play / Pause / speed run
+# entirely in the browser. No Streamlit reruns = no flicker; speed
+# buttons change the *playback rate* (ms per frame), not the number
+# of skipped frames, which is how the HTML prototype worked.
+sim_playback = importlib.import_module("utils.p3.viz.sim_playback")
+
+anim_col1, anim_col2 = st.columns([1, 1])
+anim_win_h = anim_col1.slider(
+    "Animation window (hours forward from current time)",
+    1, 6, 2, key="p13_anim_h",
+    help="How many hours of orbit motion to animate. Smaller windows "
+         "give finer-grained frames; larger windows show more passes.",
+)
+anim_step_s = anim_col2.select_slider(
+    "Frame step (s)", options=[30, 60, 120, 300], value=60,
+    key="p13_anim_step",
+    help="Simulated seconds between consecutive frames. Lower = smoother.",
+)
+
+with st.spinner("Computing animation frames…"):
+    anim_frames = sim_playback.compute_frames(
+        sats,
+        start_utc=dt,
+        duration_h=float(anim_win_h),
+        lat_deg=float(obs_lat),
+        lon_deg=float(obs_lon),
+        min_el_deg=float(min_el),
+        step_s=float(anim_step_s),
+    )
+
+anim_mode = st.radio(
+    "Animation view",
+    ("Polar sky plot", "Map overlay"),
+    index=0, horizontal=True, key="p13_anim_mode",
+    help="Polar — top-down sky view. Map overlay — world map with "
+         "satellite sub-points and connection lines. Both share the "
+         "same frame set and play via Plotly's native Play button.",
+)
+if anim_mode == "Polar sky plot":
+    st.plotly_chart(
+        sim_playback.build_playback_figure(
+            anim_frames, min_el_deg=float(min_el),
+            title="Iridium sky — live orbit playback",
+            height=520,
+        ),
+        use_container_width=True,
+    )
+else:
+    st.plotly_chart(
+        sim_playback.build_map_playback_figure(
+            sats,
+            start_utc=dt,
+            duration_h=float(anim_win_h),
+            lat_deg=float(obs_lat),
+            lon_deg=float(obs_lon),
+            min_el_deg=float(min_el),
+            step_s=float(anim_step_s),
+            style=tile_choice,
+            height=560,
+            title="Iridium ground tracks — live orbit playback",
+        ),
+        use_container_width=True,
+    )
 
 
 with st.expander("How to read this page", expanded=False):
