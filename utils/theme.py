@@ -458,41 +458,48 @@ def render_phase3_visibility_toggle() -> None:
 
 
 def _inject_phase3_toggle_host_js() -> None:
-    """Inject a MutationObserver that moves the dev-toggle into the Phase 3 area.
+    """Move the dev-toggle DOM to sit just above the Phase 3 group.
 
-    Streamlit renders ``st.sidebar.*`` widgets into ``stSidebarUserContent``
-    (above the nav). Streamlit does not let us inject DOM inside the
-    auto-generated nav list, so we relocate via JS after render. The
-    observer idempotently keeps the toggle in place on every rerun.
+    We use :func:`streamlit.components.v1.html` rather than a raw
+    ``<script>`` inside ``st.markdown`` because Streamlit Cloud
+    sometimes strips inline scripts in markdown under its CSP. The
+    component renders a 0-px iframe that reaches into the parent
+    document via ``window.parent`` — which is allowed on the same
+    origin — to move our three element-containers (anchor, label,
+    widget) into the Phase 3 nav position.
+
+    The script is idempotent and driven by a MutationObserver so it
+    survives Streamlit's reruns.
     """
-    st.markdown(
+    try:
+        from streamlit.components.v1 import html as _components_html
+    except Exception:  # noqa: BLE001 — unit tests use a streamlit stub
+        return
+    _components_html(
         """
         <script>
         (function () {
           const MARKER_ID = 'p3-dev-toggle-anchor';
           const HOST_ID = 'p3-dev-toggle-host';
+          const doc = window.parent.document;
 
           function elementContainerFor(node) {
             return node ? node.closest('[data-testid="element-container"]') : null;
           }
 
-          function locateTogglePieces(root) {
-            const anchor = root.getElementById(MARKER_ID);
+          function locateTogglePieces() {
+            const anchor = doc.getElementById(MARKER_ID);
             if (!anchor) return null;
             const anchorCont = elementContainerFor(anchor);
             if (!anchorCont) return null;
-            // The label <span> and the checkbox each get their own
-            // element-container emitted immediately after the anchor.
             const labelCont = anchorCont.nextElementSibling;
             const widgetCont = labelCont ? labelCont.nextElementSibling : null;
             if (!labelCont || !widgetCont) return null;
             return {anchorCont, labelCont, widgetCont};
           }
 
-          function locatePhase3Li(root) {
-            // Match the Phase 3 Overview <li> robustly: href ends with
-            // "/Phase3_Overview" OR contains "Phase3_Overview".
-            const nav = root.querySelector('[data-testid="stSidebarNavItems"]');
+          function locatePhase3Li() {
+            const nav = doc.querySelector('[data-testid="stSidebarNavItems"]');
             if (!nav) return null;
             const links = nav.querySelectorAll('a[href*="Phase3_Overview"]');
             for (const a of links) {
@@ -502,17 +509,14 @@ def _inject_phase3_toggle_host_js() -> None:
             return null;
           }
 
-          function ensureHost(root, pieces) {
-            let host = root.getElementById(HOST_ID);
+          function ensureHost(pieces) {
+            let host = doc.getElementById(HOST_ID);
             if (!host) {
-              host = root.createElement('div');
+              host = doc.createElement('div');
               host.id = HOST_ID;
-              // Order: label → widget
               host.appendChild(pieces.labelCont);
               host.appendChild(pieces.widgetCont);
             } else {
-              // Idempotency — if Streamlit re-emitted either piece we
-              // re-adopt them into the host.
               if (pieces.labelCont.parentElement !== host) {
                 host.insertBefore(pieces.labelCont, host.firstChild);
               }
@@ -524,30 +528,30 @@ def _inject_phase3_toggle_host_js() -> None:
           }
 
           function rearrange() {
-            const root = document;
-            const pieces = locateTogglePieces(root);
-            const phase3Li = locatePhase3Li(root);
-            if (!pieces || !phase3Li) return;
-            const host = ensureHost(root, pieces);
-            if (host.parentElement !== phase3Li.parentElement
-                || host.nextSibling !== phase3Li) {
-              phase3Li.parentElement.insertBefore(host, phase3Li);
-            }
+            try {
+              const pieces = locateTogglePieces();
+              const phase3Li = locatePhase3Li();
+              if (!pieces || !phase3Li) return;
+              const host = ensureHost(pieces);
+              if (host.parentElement !== phase3Li.parentElement
+                  || host.nextSibling !== phase3Li) {
+                phase3Li.parentElement.insertBefore(host, phase3Li);
+              }
+            } catch (_e) { /* sidebar may not be ready yet */ }
           }
 
-          // Attempt now + on every DOM change (Streamlit reruns the
-          // sidebar on every interaction).
           rearrange();
-          if (window.__p3ToggleObserver) {
-            window.__p3ToggleObserver.disconnect();
+          // Re-apply on every DOM change so the move survives Streamlit reruns.
+          if (window.parent.__p3ToggleObserver) {
+            window.parent.__p3ToggleObserver.disconnect();
           }
           const obs = new MutationObserver(rearrange);
-          window.__p3ToggleObserver = obs;
-          obs.observe(document.body, {childList: true, subtree: true});
+          window.parent.__p3ToggleObserver = obs;
+          obs.observe(doc.body, {childList: true, subtree: true});
         })();
         </script>
         """,
-        unsafe_allow_html=True,
+        height=0,
     )
 
 
