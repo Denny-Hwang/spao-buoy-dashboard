@@ -171,15 +171,23 @@ def canonicalize_lat_lon(df: pd.DataFrame) -> pd.DataFrame:
 def find_time_col(df: pd.DataFrame) -> str | None:
     """Return the first column that looks like a timestamp, or None.
 
-    The matched column is coerced in-place with ``pd.to_datetime`` so the
-    caller can immediately filter on it.
+    The matched column is coerced in-place with ``pd.to_datetime(utc=True)``
+    so the caller can immediately filter on it. ``apply_device_time_filter``
+    below aligns naive picker bounds to the column's tz so downstream
+    comparisons work whether or not upstream normalization has already
+    made the column tz-aware.
     """
     if df is None or df.empty:
         return None
     for c in df.columns:
         cl = c.lower()
         if any(kw in cl for kw in TIME_KEYWORDS):
-            df[c] = pd.to_datetime(df[c], errors="coerce", utc=False)
+            # CLAUDE.md Rule 5: always tz-aware UTC. Previously this was
+            # ``utc=False``, which silently dropped tz info on inputs that
+            # arrived already-localized (FY25 preset, test fixtures) and
+            # only happened to work because sheets_client had already
+            # normalized the column upstream.
+            df[c] = pd.to_datetime(df[c], errors="coerce", utc=True)
             return c
     return None
 

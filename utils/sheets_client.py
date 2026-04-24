@@ -68,6 +68,42 @@ def _get_sheets_display_tz() -> str:
     return (os.environ.get("SHEETS_DISPLAY_TZ", "") or "").strip() or "UTC"
 
 
+# Module-level latch so the missing-TZ warning is surfaced at most once
+# per session. The same warning is re-raised via ``st.toast`` when a
+# Streamlit runtime is attached so operators can notice it in the UI.
+_MISSING_DISPLAY_TZ_WARNED = False
+
+
+def _warn_missing_display_tz_once() -> None:
+    """Emit a one-shot warning when naive timestamps hit an unset TZ.
+
+    The 12-h phase offset bug (commit ``bafe931``) came back into
+    production the moment the ``SHEETS_DISPLAY_TZ`` secret was omitted
+    after a redeploy. The silent fallback to ``"UTC"`` hides that. We
+    now log a warning the first time we localize a naive timestamp
+    without an explicit zone, and — when a Streamlit runtime is
+    attached — surface a toast so the operator sees it.
+    """
+    global _MISSING_DISPLAY_TZ_WARNED
+    if _MISSING_DISPLAY_TZ_WARNED:
+        return
+    _MISSING_DISPLAY_TZ_WARNED = True
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "SHEETS_DISPLAY_TZ not set; naive timestamps are being treated "
+        "as UTC. If the spreadsheet's Display Time Zone is not UTC, set "
+        "SHEETS_DISPLAY_TZ (secret or env var) to avoid a phase offset."
+    )
+    try:
+        if hasattr(st, "toast"):
+            st.toast(
+                "⚠ SHEETS_DISPLAY_TZ not set — assuming UTC.",
+                icon="⚠",
+            )
+    except Exception:  # noqa: BLE001 — toast is best-effort
+        pass
+
+
 _GPS_TZ_CACHE: dict[tuple[float, float], str] = {}
 _TZ_FINDER_SINGLETON = None
 _TZ_FINDER_UNAVAILABLE = False
@@ -164,6 +200,12 @@ def normalize_ts_to_utc(
                 .dt.tz_convert("UTC")
                 .dt.tz_localize(None)
             )
+        else:
+            # Naive values + no explicit zone → we're assuming UTC.
+            # Surface this once so a missing secret doesn't silently
+            # reintroduce the ~12 h phase offset bug.
+            if parsed.notna().any():
+                _warn_missing_display_tz_once()
         return parsed
     return parsed.dt.tz_convert("UTC").dt.tz_localize(None)
 

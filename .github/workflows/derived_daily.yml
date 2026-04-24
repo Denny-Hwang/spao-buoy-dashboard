@@ -17,6 +17,12 @@ on:
         description: 'Compute without writing to Sheets'
         default: 'false'
 
+# Derived_Daily is written via ``ws.clear()`` + ``ws.update()``; the
+# intermediate window is racy so only one writer may run at a time.
+concurrency:
+  group: enrichment-write
+  cancel-in-progress: false
+
 jobs:
   compute:
     runs-on: ubuntu-latest

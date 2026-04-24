@@ -14,13 +14,13 @@ operation) so the overhead is negligible.
 
 from __future__ import annotations
 
-import math
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
 from .physics.ekman import fit_windage
+from .physics.geom import haversine_km
 from .physics.storms import detect_storms
 from .physics.teng_norm import eta_level1
 from .stats.trends import theil_sen
@@ -72,9 +72,6 @@ _SAT_COLUMNS = {
     "OSTIA":  ("SAT_SST_OSTIA", "SAT_SST_OSTIA_cC"),
 }
 
-EARTH_RADIUS_M = 6_371_000.0
-
-
 def _first_alias(df: pd.DataFrame, aliases: Iterable[str]) -> str | None:
     for a in aliases:
         if a in df.columns:
@@ -111,16 +108,6 @@ def _sat_series(df: pd.DataFrame, name: str) -> pd.Series | None:
     return _to_celsius(df[col], col)
 
 
-def _haversine_km(lat1, lon1, lat2, lon2) -> float:
-    rlat1 = math.radians(lat1)
-    rlat2 = math.radians(lat2)
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2)
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(max(0.0, min(1.0, a)))) / 1000.0
-
-
 # ──────────────────────────────────────────────────────────────────────
 # Per-day aggregation
 # ──────────────────────────────────────────────────────────────────────
@@ -140,7 +127,7 @@ def _daily_distance_km_and_speed(sub: pd.DataFrame) -> tuple[float, float]:
         if not (np.isfinite(lat[i - 1]) and np.isfinite(lat[i])
                 and np.isfinite(lon[i - 1]) and np.isfinite(lon[i])):
             continue
-        d = _haversine_km(lat[i - 1], lon[i - 1], lat[i], lon[i])
+        d = haversine_km(lat[i - 1], lon[i - 1], lat[i], lon[i])
         dt = (ts.iloc[i] - ts.iloc[i - 1]).total_seconds()
         dist_km += d
         if dt and dt > 0:

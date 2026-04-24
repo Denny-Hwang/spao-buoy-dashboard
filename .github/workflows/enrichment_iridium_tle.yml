@@ -11,6 +11,14 @@ on:
         description: 'Run without writing to Sheets'
         default: 'false'
 
+# TLE writes target dedicated ``_iridium_tle`` / ``_gps_tle`` tabs, so
+# they use their own serializer rather than the shared enrichment one —
+# two TLE jobs still mustn't overlap, but they may run alongside a
+# Phase 2 enrichment job.
+concurrency:
+  group: enrichment-tle
+  cancel-in-progress: false
+
 jobs:
   fetch-tle:
     runs-on: ubuntu-latest
