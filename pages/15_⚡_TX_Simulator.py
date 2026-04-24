@@ -212,16 +212,15 @@ if run or "p15_frames" in st.session_state:
         "Visualisation",
         ("Polar sky plot", "Map overlay"),
         index=0, horizontal=True, key="p15_anim_mode",
-        help="Polar sky plot — clean top-down view with Plotly's "
-             "built-in Play / Pause. Map overlay — world map with "
-             "satellite sub-points + dashed link lines scrubbed by a "
-             "slider, matching the Tracker page.",
+        help="Polar sky plot — top-down sky view. Map overlay — world "
+             "map with Iridium sub-points and dashed link lines. Both "
+             "use Plotly's **client-side** Play button: smooth at any "
+             "speed, no flicker, no server reruns.",
     )
 
     frame_count = kpi["t_idx"].max() + 1 if not kpi.empty else 1
 
     if mode == "Polar sky plot":
-        # Original Plotly frames-based animation with its own Play bar.
         st.plotly_chart(
             sim_playback.build_playback_figure(
                 frames_df, min_el_deg=float(min_el),
@@ -229,38 +228,40 @@ if run or "p15_frames" in st.session_state:
             ),
             use_container_width=True,
         )
-        # Show the slider-driven map BELOW as a supplementary snapshot
-        # so both views are still available to the operator.
-        st.markdown("##### Synchronised map snapshot")
-        if frame_count > 1:
-            f_idx = st.slider("Scrub frame", 0, int(frame_count - 1), 0,
-                              key="p15_scrub")
-        else:
-            f_idx = 0
     else:
-        # Map-overlay mode: the map IS the animation, advanced by an
-        # autoplay loop tied to the shared Phase 3 playback controller.
-        playback = importlib.import_module("utils.p3.viz.playback")
-        pb = playback.render_play_controls(
-            "p15_map",
-            label="Map playback",
-            help_text="Cycles through simulation frames and re-draws "
-                      "the overlay map on each tick.",
-            allowed_speeds=(("1×", 1), ("5×", 5), ("10×", 10), ("30×", 30)),
-            tick_ms=400,
+        # World-map animation — Plotly Scattergeo + frames. Speed
+        # buttons change frame.duration client-side so 30× is a
+        # genuinely faster replay, not a frame skip.
+        map_style = st.radio(
+            "Map style", sim_playback.MAP_STYLE_LABELS,
+            index=0, horizontal=True, key="p15_map_style",
         )
-        if "p15_map_scrub" not in st.session_state:
-            st.session_state["p15_map_scrub"] = 0
-        if pb.playing:
-            nxt = (int(st.session_state["p15_map_scrub"]) + pb.speed_units) % max(1, frame_count)
-            st.session_state["p15_map_scrub"] = nxt
-        if frame_count > 1:
-            f_idx = st.slider("Scrub frame", 0, int(frame_count - 1),
-                              int(st.session_state.get("p15_map_scrub", 0)),
-                              key="p15_map_scrub")
-        else:
-            f_idx = 0
+        with st.spinner("Composing map frames…"):
+            map_fig = sim_playback.build_map_playback_figure(
+                sats,
+                start_utc=start_utc,
+                duration_h=float(duration_h),
+                lat_deg=float(obs_lat),
+                lon_deg=float(obs_lon),
+                min_el_deg=float(min_el),
+                step_s=float(step_s),
+                style=map_style,
+                height=560,
+                title="Iridium ground tracks — simulated playback",
+            )
+        st.plotly_chart(map_fig, use_container_width=True)
 
+    # ── Static snapshot summary (below the animation) --------------
+    st.markdown("##### Snapshot inspector")
+    if frame_count > 1:
+        f_idx = st.slider(
+            "Scrub frame for the snapshot metrics below",
+            0, int(frame_count - 1), 0, key="p15_scrub",
+            help="Independent of the animation above — use it to read "
+                 "exact KPI values for a specific frame.",
+        )
+    else:
+        f_idx = 0
     snap = kpi[kpi["t_idx"] == f_idx]
     t_snap = snap["t_utc"].iloc[0] if not snap.empty else start_utc
     n_vis = int(snap["n_visible"].iloc[0]) if not snap.empty else 0
@@ -273,34 +274,6 @@ if run or "p15_frames" in st.session_state:
     c3.metric("Best el / margin",
               f"{best_el_snap:.1f}° / {best_margin_snap:.1f} dB"
               if best_el_snap is not None and pd.notna(best_el_snap) else "—")
-
-    # Folium snapshot at the scrubbed instant — HTML-prototype-style
-    # overlay: observer + visible sat sub-points + connection lines +
-    # horizon ring, on a satellite tile by default.
-    try:
-        from streamlit_folium import st_folium
-        from utils.p3.viz import map_overlay as overlay  # lazy import
-        if isinstance(t_snap, pd.Timestamp):
-            dt_snap = t_snap.to_pydatetime()
-        else:
-            dt_snap = pd.Timestamp(t_snap, tz="UTC").to_pydatetime()
-        tile_choice = st.radio(
-            "Map tile", overlay.TILE_LABELS,
-            index=0, horizontal=True, key="p15_tile",
-        )
-        m = overlay.build_overlay_map(
-            observer_lat=float(obs_lat),
-            observer_lon=float(obs_lon),
-            dt=dt_snap,
-            iridium_sats=sats,
-            min_el_deg=float(min_el),
-            tile=tile_choice,
-            zoom_start=3,
-        )
-        st_folium(m, height=420, use_container_width=True,
-                  returned_objects=[])
-    except Exception as exc:  # noqa: BLE001
-        st.caption(f"Map unavailable: {exc}")
 
     # ── TX event log -------------------------------------------------
     st.subheader("TX event log")
