@@ -17,6 +17,14 @@ on:
         required: false
         default: ''
 
+# Serialize the enrichment-write path: the scheduled cron and any
+# operator-triggered workflow_dispatch must never clear-and-rewrite
+# Derived_Daily concurrently, since the intermediate read-back window
+# is racy against a second job's write.
+concurrency:
+  group: enrichment-write
+  cancel-in-progress: false
+
 jobs:
   enrich:
     runs-on: ubuntu-latest

@@ -45,11 +45,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-try:
-    _flag = importlib.import_module("utils.p3.__phase3_flag")
-    _flag.render_sidebar_controls()
-except Exception as exc:  # noqa: BLE001
-    st.sidebar.caption(f"Phase 3 controls unavailable: {exc}")
+# Phase 3 per-page sidebar (TZ selector only; visibility toggle is
+# rendered by the shared ``render_sidebar`` above).
+from utils.p3 import __phase3_flag as _flag  # noqa: E402
+_flag.render_sidebar_controls()
 
 # ── Phase 3 modules -------------------------------------------------
 try:
@@ -141,6 +140,35 @@ if is_fy25:
         "sat-pass timing is approximate; visibility *counts* and "
         "**rb1 vs geometry** correlations remain representative."
     )
+    # Surface the actual TLE age vs the FY25 epoch so the operator
+    # knows when the retrograde propagation is running far outside
+    # SGP4's ±1 km/day accuracy band.
+    try:
+        sgp4_engine = importlib.import_module("utils.p3.sgp4_engine")
+        epochs = [
+            sgp4_engine.tle_epoch(s) for s in iridium_sats
+            if sgp4_engine.tle_epoch(s) is not None
+        ]
+        if epochs and tle_epoch_for_fy25 is not None:
+            median_epoch = sorted(epochs)[len(epochs) // 2]
+            age_days = abs(
+                (median_epoch - tle_epoch_for_fy25).total_seconds() / 86400.0
+            )
+            if age_days > 60:
+                st.error(
+                    f"Iridium TLE is **{age_days:.0f} days** off the FY25 "
+                    "epoch — retrograde propagation is unreliable. Run the "
+                    "Phase 3 TLE Enrichment cron, or interpret geometry "
+                    "counts as indicative only."
+                )
+            elif age_days > 30:
+                st.warning(
+                    f"Iridium TLE is **{age_days:.0f} days** off the FY25 "
+                    "epoch — expect ~{0:.0f} km/sat position error from "
+                    "SGP4 drift.".format(age_days)
+                )
+    except Exception as exc:  # noqa: BLE001 — diagnostic, never fatal
+        st.caption(f"TLE age check skipped: {exc}")
 
 
 # ── Enrich the frame -----------------------------------------------

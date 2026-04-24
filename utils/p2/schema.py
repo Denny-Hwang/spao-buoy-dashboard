@@ -163,3 +163,16 @@ __all__ = [
 # Sanity: ensure numpy is importable at module load (surfaces missing dep
 # early during validation rather than inside a fetcher).
 assert np.uint16(FULL_ENRICHED_FLAG) == int(FULL_ENRICHED_FLAG)
+
+
+# Sanity: the writable column registry and the on-sheet column order
+# MUST stay in lockstep. A mismatch meant new enrichment columns got
+# silently dropped on write (because ``_format_cells`` iterates over
+# ``ENRICH_COLUMN_ORDER``), so we fail fast at import time instead.
+_registry_cols = set(ENRICHED_COLUMNS)
+_ordered_cols = set(ENRICH_COLUMN_ORDER)
+assert _registry_cols == _ordered_cols, (
+    "Phase 2 schema drift: ENRICHED_COLUMNS and ENRICH_COLUMN_ORDER "
+    f"disagree. missing_from_order={_registry_cols - _ordered_cols}, "
+    f"missing_from_registry={_ordered_cols - _registry_cols}"
+)

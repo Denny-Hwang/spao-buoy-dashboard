@@ -9,6 +9,12 @@ on:
         description: 'Run without writing to Sheets'
         default: 'false'
 
+# Share the ``enrichment-write`` serializer with the daily / derived
+# workflows so at most one writer touches the Sheet at a time.
+concurrency:
+  group: enrichment-write
+  cancel-in-progress: false
+
 jobs:
   enrich:
     runs-on: ubuntu-latest

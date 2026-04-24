@@ -70,7 +70,7 @@ _DESC: dict = getattr(panels, "DESCRIPTIONS", {}) or {}
 try:
     toolbar = importlib.import_module("utils.p2.ui_toolbar")
     df, selected_devices, time_col, dev_col = toolbar.render_device_time_filter(
-        raw_df, key_prefix="p9",
+        raw_df, key_prefix="p10",
     )
 except Exception as exc:  # noqa: BLE001
     st.error(f"Toolbar unavailable: {exc}")
