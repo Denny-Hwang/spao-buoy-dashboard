@@ -68,32 +68,61 @@ def _get_sheets_display_tz() -> str:
     return (os.environ.get("SHEETS_DISPLAY_TZ", "") or "").strip() or "UTC"
 
 
-# Module-level latch so the missing-TZ warning is surfaced at most once
-# per session. The same warning is re-raised via ``st.toast`` when a
-# Streamlit runtime is attached so operators can notice it in the UI.
+# Module-level latches.
+#
+# ``_MISSING_DISPLAY_TZ_WARNED`` gates the one-shot log line so we don't
+# spam stderr on every cached read.
+#
+# ``_MISSING_DISPLAY_TZ_PENDING_TOAST`` tracks whether we still owe the
+# operator a UI toast. Crucially, the toast is NEVER emitted from inside
+# the cache chain (``normalize_ts_to_utc`` → ``get_device_data`` etc.):
+# any ``st.*`` call inside an ``@st.cache_data`` function is recorded
+# into the cache entry's "delta replay" and ``st.toast`` does not
+# survive replay, raising ``CacheReplayClosureError`` on the next cache
+# hit. Pages surface the toast via ``surface_pending_warnings()`` AFTER
+# they finish reading cached data.
 _MISSING_DISPLAY_TZ_WARNED = False
+_MISSING_DISPLAY_TZ_PENDING_TOAST = False
 
 
 def _warn_missing_display_tz_once() -> None:
-    """Emit a one-shot warning when naive timestamps hit an unset TZ.
+    """Record a one-shot warning when naive timestamps hit an unset TZ.
 
     The 12-h phase offset bug (commit ``bafe931``) came back into
     production the moment the ``SHEETS_DISPLAY_TZ`` secret was omitted
-    after a redeploy. The silent fallback to ``"UTC"`` hides that. We
-    now log a warning the first time we localize a naive timestamp
-    without an explicit zone, and — when a Streamlit runtime is
-    attached — surface a toast so the operator sees it.
+    after a redeploy. The silent fallback to ``"UTC"`` hides that.
+
+    This function is safe to call from inside a cached function: it
+    only logs and flips a module-level flag. The companion
+    ``surface_pending_warnings()`` reads the flag and emits the UI
+    toast outside the cache chain.
     """
-    global _MISSING_DISPLAY_TZ_WARNED
+    global _MISSING_DISPLAY_TZ_WARNED, _MISSING_DISPLAY_TZ_PENDING_TOAST
     if _MISSING_DISPLAY_TZ_WARNED:
         return
     _MISSING_DISPLAY_TZ_WARNED = True
+    _MISSING_DISPLAY_TZ_PENDING_TOAST = True
     import logging as _logging
     _logging.getLogger(__name__).warning(
         "SHEETS_DISPLAY_TZ not set; naive timestamps are being treated "
         "as UTC. If the spreadsheet's Display Time Zone is not UTC, set "
         "SHEETS_DISPLAY_TZ (secret or env var) to avoid a phase offset."
     )
+
+
+def surface_pending_warnings() -> None:
+    """Emit any deferred UI toasts queued by the cache-safe warners.
+
+    Pages should call this once after their data fetch (i.e. outside
+    any ``@st.cache_data`` function) so the toast is rendered fresh
+    every run instead of being recorded into a cache entry's delta
+    replay (which fails for ``st.toast`` with
+    ``CacheReplayClosureError``).
+    """
+    global _MISSING_DISPLAY_TZ_PENDING_TOAST
+    if not _MISSING_DISPLAY_TZ_PENDING_TOAST:
+        return
+    _MISSING_DISPLAY_TZ_PENDING_TOAST = False
     try:
         if hasattr(st, "toast"):
             st.toast(

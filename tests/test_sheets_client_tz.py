@@ -120,3 +120,90 @@ def test_tz_for_gps_invalid_returns_none():
     assert tz_for_gps(float("nan"), 0.0) is None
     assert tz_for_gps(0.0, 0.0) is None
     assert tz_for_gps("not-a-number", 0.0) is None
+
+
+# ---------- cache-replay safety ----------------------------------
+#
+# Regression guard for the ``CacheReplayClosureError`` that hit
+# pages/2_📡_Live_Telemetry.py when ``get_device_data`` (decorated with
+# ``@st.cache_data``) was served from cache: ``_warn_missing_display_
+# tz_once()`` previously called ``st.toast(...)``, which Streamlit's
+# delta-replay protocol records but cannot replay, raising
+# CacheReplayClosureError on the very next cache hit.
+
+def test_warn_missing_display_tz_does_not_call_streamlit(monkeypatch):
+    """The warner must be safe to call from inside an @st.cache_data
+    function — i.e. it must not invoke any ``st.*`` UI element."""
+    import utils.sheets_client as sc
+
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_WARNED", False)
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_PENDING_TOAST", False)
+
+    called: list[tuple[str, tuple, dict]] = []
+
+    class _Boom:
+        def __getattr__(self, name):
+            def _record(*args, **kwargs):
+                called.append((name, args, kwargs))
+            return _record
+
+    monkeypatch.setattr(sc, "st", _Boom())
+
+    sc._warn_missing_display_tz_once()
+
+    assert called == [], (
+        "warner reached into st.* — that gets recorded into cache "
+        "delta replay and breaks on the next cache hit"
+    )
+    assert sc._MISSING_DISPLAY_TZ_PENDING_TOAST is True
+    assert sc._MISSING_DISPLAY_TZ_WARNED is True
+
+
+def test_normalize_ts_to_utc_does_not_call_streamlit(monkeypatch):
+    """End-to-end: parsing naive timestamps with no display TZ must not
+    emit any ``st.*`` call. This is what makes ``normalize_ts_to_utc``
+    safe inside the cached ``get_device_data`` chain."""
+    import utils.sheets_client as sc
+
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_WARNED", False)
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_PENDING_TOAST", False)
+    monkeypatch.delenv("SHEETS_DISPLAY_TZ", raising=False)
+
+    called: list[str] = []
+
+    class _Boom:
+        def __getattr__(self, name):
+            def _record(*args, **kwargs):
+                called.append(name)
+            return _record
+
+    monkeypatch.setattr(sc, "st", _Boom())
+
+    out = sc.normalize_ts_to_utc(pd.Series(["2026-04-12 04:00:00"]))
+    assert out.iloc[0] == pd.Timestamp("2026-04-12 04:00:00")
+    assert called == [], f"unexpected st.* calls inside cache chain: {called}"
+
+
+def test_surface_pending_warnings_emits_toast_outside_cache(monkeypatch):
+    """The deferred surface helper is the place where ``st.toast`` is
+    allowed — pages call it after the cached fetch returns."""
+    import utils.sheets_client as sc
+
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_WARNED", True)
+    monkeypatch.setattr(sc, "_MISSING_DISPLAY_TZ_PENDING_TOAST", True)
+
+    toasts: list[tuple[tuple, dict]] = []
+
+    class _FakeSt:
+        def toast(self, *args, **kwargs):
+            toasts.append((args, kwargs))
+
+    monkeypatch.setattr(sc, "st", _FakeSt())
+
+    sc.surface_pending_warnings()
+
+    assert len(toasts) == 1
+    assert sc._MISSING_DISPLAY_TZ_PENDING_TOAST is False
+
+    sc.surface_pending_warnings()
+    assert len(toasts) == 1, "toast must be one-shot per pending event"
