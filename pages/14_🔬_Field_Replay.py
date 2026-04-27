@@ -288,49 +288,57 @@ else:
         retry_tag = f" · rb2={rb2:.1f}s" if rb2 > 0 else ""
         return f"{ts_str}  ·  {dev}  ·  rb1={rb1:.1f}s{retry_tag}  ·  IRI={nv_str}{fail_tag}"
 
-    # Event selection state — use a dedicated key the Play loop can
-    # write to without racing the selectbox widget. We keep the
-    # widget key separate (``p14_event_select``) to avoid the
-    # "session_state cannot be set after widget" error.
-    if "p14_event_idx" not in st.session_state:
-        st.session_state["p14_event_idx"] = 0
+    # Event index is stored under the selectbox's own widget key so
+    # Streamlit's persisted widget state stays in lockstep with the
+    # value rendered in the dropdown. Writing to ``p14_event_select``
+    # *before* the widget renders is allowed; writing to it *after*
+    # would raise StreamlitAPIException.
+    playback = importlib.import_module("utils.p3.viz.playback")
+    allowed_speeds = (("1×", 1), ("2×", 2), ("5×", 5), ("10×", 10))
+    speed_label_to_units = dict(allowed_speeds)
+
+    if "p14_event_select" not in st.session_state:
+        st.session_state["p14_event_select"] = 0
     # Clamp in case a prior filter change left a stale value.
-    st.session_state["p14_event_idx"] = min(
-        max(0, int(st.session_state["p14_event_idx"])), len(filtered) - 1
+    st.session_state["p14_event_select"] = min(
+        max(0, int(st.session_state["p14_event_select"])),
+        len(filtered) - 1,
     )
+
+    # If Play was active on the previous autorefresh tick, advance the
+    # selectbox state *before* the widget is re-instantiated so the
+    # dropdown, kv panel, map and sky plots all tick forward together.
+    # The previous version wrote to a separate ``p14_event_idx`` key
+    # and let the selectbox's persisted ``p14_event_select`` overwrite
+    # it on every rerun, which froze the play loop on the second
+    # event.
+    if st.session_state.get("p14_pb_playing", False):
+        sp_label = st.session_state.get("p14_pb_speed", allowed_speeds[0][0])
+        units = speed_label_to_units.get(sp_label, 1)
+        cur = int(st.session_state["p14_event_select"])
+        st.session_state["p14_event_select"] = (cur + units) % len(filtered)
 
     picker_options = list(range(len(filtered)))
     picker_labels = {i: _label(i) for i in picker_options}
 
-    # Pickbox + Play controls on the same row. The Play controller
-    # cycles the event index through the filtered set; the detail
-    # pane and sky plots re-render on every tick, so the user sees an
-    # event-by-event slideshow of the deployment.
-    playback = importlib.import_module("utils.p3.viz.playback")
     pick_col, play_col = st.columns([2, 3])
     with pick_col:
         sel_idx = st.selectbox(
             "Select event (case-labelled)",
             picker_options,
-            index=st.session_state["p14_event_idx"],
             format_func=lambda i: picker_labels[i],
             key="p14_event_select",
         )
-        st.session_state["p14_event_idx"] = int(sel_idx)
     with play_col:
-        pb = playback.render_play_controls(
+        playback.render_play_controls(
             "p14",
             label="Event playback",
             help_text="Cycles through the filtered events. Event details, "
                       "map, sky plots and verdict all re-render on each tick. "
                       "Pause to linger on one event.",
-            allowed_speeds=(("1×", 1), ("2×", 2), ("5×", 5), ("10×", 10)),
+            allowed_speeds=allowed_speeds,
             tick_ms=1200,   # deliberately slower than Tracker so details are readable
         )
-    if pb.playing:
-        new_idx = (st.session_state["p14_event_idx"] + pb.speed_units) % len(filtered)
-        st.session_state["p14_event_idx"] = new_idx
-        sel_idx = new_idx
 
     row = filtered.iloc[sel_idx]
 

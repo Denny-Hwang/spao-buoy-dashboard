@@ -166,7 +166,10 @@ def build_playback_figure(
     fig.update_layout(
         title=title,
         height=height,
-        margin=dict(l=30, r=30, t=60, b=60),
+        # Bottom margin accommodates two rows below the chart: the
+        # speed-button row (pad.t=10, ~32 px tall) and the scrub
+        # slider (pad.t=70, ~22 px tall).
+        margin=dict(l=30, r=30, t=60, b=110),
         polar=dict(
             bgcolor="#f4f6f8",
             radialaxis=dict(range=[0, 90], tickvals=[0, 30, 60, 90],
@@ -176,15 +179,17 @@ def build_playback_figure(
                              ticktext=["N", "E", "S", "W"]),
         ),
         updatemenus=[
-            # One Play button per speed preset (client-side playback)
-            # + a single Pause. Placed bottom-left so they don't
-            # collide with the frame-scrub slider.
+            # Play buttons sit ~10 px below the chart on a dedicated
+            # row; the frame-scrub slider lives on its own row 60 px
+            # further down. Putting them on the same vertical band (as
+            # the previous version did) made the buttons hide the
+            # left third of the slider.
             dict(
                 type="buttons",
                 showactive=False,
                 y=0, x=0,
                 xanchor="left", yanchor="top",
-                pad=dict(t=50, r=10),
+                pad=dict(t=10, r=10),
                 direction="right",
                 buttons=[
                     *[
@@ -215,7 +220,7 @@ def build_playback_figure(
             y=0, x=0.1,
             xanchor="left", yanchor="top",
             len=0.85,
-            pad=dict(t=50, b=10),
+            pad=dict(t=70, b=10),
             currentvalue=dict(prefix="frame #",
                               font=dict(size=11, color="#1A1A1A")),
             steps=slider_steps,
@@ -400,18 +405,23 @@ def build_map_playback_figure(
     fig.update_layout(
         title=title,
         height=height,
-        margin=dict(l=10, r=10, t=50, b=50),
+        # Bottom margin matches the polar figure — speed-button row +
+        # scrub slider need ~100 px of vertical space below the map.
+        margin=dict(l=10, r=10, t=50, b=110),
         geo=dict(
             **geo,
             center=dict(lat=lat_deg, lon=lon_deg),
             projection_scale=2.6,   # tighter view than default
         ),
         updatemenus=[dict(
+            # Buttons row first (pad.t=10), slider row 60 px below
+            # (pad.t=70). Same staggered layout as the polar figure —
+            # the prior single-row layout overlapped the slider.
             type="buttons",
             showactive=False,
             y=0, x=0,
             xanchor="left", yanchor="top",
-            pad=dict(t=40, r=10),
+            pad=dict(t=10, r=10),
             direction="right",
             buttons=[
                 *[
@@ -441,7 +451,7 @@ def build_map_playback_figure(
             y=0, x=0.1,
             xanchor="left", yanchor="top",
             len=0.85,
-            pad=dict(t=40, b=10),
+            pad=dict(t=70, b=10),
             currentvalue=dict(prefix="frame #",
                               font=dict(size=11, color="#1A1A1A")),
             steps=slider_steps,
