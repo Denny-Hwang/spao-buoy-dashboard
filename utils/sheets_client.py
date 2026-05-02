@@ -351,7 +351,10 @@ def normalize_sheet_data(records: list[dict], format_type: str) -> pd.DataFrame:
             continue
 
         # ── Decode ──
-        result = auto_detect_and_decode(hex_str)
+        # Pass timestamp so V6.5/V6.6 packets (identical 45B/49B layout) pick
+        # the correct SST scale: ÷1000 for milli-°C (≤V6.5) vs ÷100 for
+        # centi-°C (V6.6+, deployed 2026-05-01 17:00 PDT).
+        result = auto_detect_and_decode(hex_str, packet_timestamp=timestamp)
 
         row: dict = {
             # Absolute 1-indexed worksheet row (header is row 1, first data row is 2).

@@ -22,7 +22,9 @@ Real-time monitoring dashboard for the Self-Powered Arctic Ocean (SPAO) buoy sys
 
 ### Supported Hardware
 
-Six telemetry packet versions are auto-detected by byte length:
+Telemetry packet versions are auto-detected by byte length. V6.5 and V6.6
+share the same 45B/49B layout and are distinguished by packet timestamp
+(see note below the table):
 
 | Version | Bytes | Key Difference |
 |---------|-------|----------------|
@@ -30,8 +32,18 @@ Six telemetry packet versions are auto-detected by byte length:
 | FY26 (v3) | 37 | Simplified previous-session fields |
 | FY26 (v5) | 43 | Extended sensor set |
 | FY26 (v5) + EC | 47 | Adds electrical conductivity & salinity |
-| FY26 (v6.4) | 45 | Adds Prev Oper Time, TENG scale change |
-| FY26 (v6.4) + EC | 49 | v6.4 + conductivity & salinity |
+| FY26 (v6.4 / v6.5) | 45 | Adds Prev Oper Time, TENG scale change; SST = int16 milli-°C (÷1000) |
+| FY26 (v6.4 / v6.5) + EC | 49 | v6.5 + conductivity & salinity |
+| FY26 (v6.6) | 45 | Same layout as v6.5; SST = int16 centi-°C (÷100), fixes overflow >32.767 °C |
+| FY26 (v6.6) + EC | 49 | v6.6 + conductivity & salinity |
+
+**V6.6 SST encoding change.** V6.5 milli-°C int16 silently overflowed when
+the sensor read above 32.767 °C (e.g. outdoor bench testing in direct sun),
+producing spurious large-negative values. V6.6 keeps the same byte layout
+but switches the SST field to centi-°C, extending the usable range to
+±327.67 °C. Decoders pick the scale automatically from the packet timestamp
+(cutoff: **2026-05-01 17:00 PDT / 2026-05-02 00:00 UTC**); the standalone
+**Packet Decoder** page exposes a manual V6.5/V6.6 selector.
 
 ---
 

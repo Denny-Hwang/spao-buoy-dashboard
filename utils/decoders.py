@@ -1,15 +1,56 @@
 """
-SPAO Buoy packet decoders for FY25, FY26(v3), FY26(v5), FY26(v5)+EC, FY26(v6.4), and FY26(v6.4)+EC telemetry formats.
+SPAO Buoy packet decoders for FY25, FY26(v3), FY26(v5), FY26(v5)+EC, FY26(v6.4/6.5),
+FY26(v6.4/6.5)+EC, FY26(v6.6), and FY26(v6.6)+EC telemetry formats.
 
 Packet Structure Definition (V6.4):
   - Added Prev Oper Time (2 bytes, uint16, sec) at offset 22 (shifts all subsequent fields +2)
   - TENG Current Avg is now best 1-min sliding window average, scale ÷100
   - Prev TENG Avg/Max now scale ÷100
   - 45B (no EC) / 49B (with EC+SSS)
+
+V6.6 change (2026-05-01 17:00 PDT / 2026-05-02 00:00 UTC):
+  - Byte layout unchanged from V6.5 (still 45B / 49B)
+  - SST encoding: int16 centi-°C (÷100) instead of int16 milli-°C (÷1000).
+    The milli-°C int16 silently overflowed at sensor readings >32.767 °C
+    (e.g. outdoor bench testing in direct sunlight), producing spurious
+    large-negative values. Centi-°C extends usable range to ±327.67 °C.
 """
 
 import struct
+from datetime import datetime, timezone
 from typing import Optional
+
+
+# V6.6 firmware deploy time. Packets received at or after this UTC instant
+# decode SST as centi-°C (÷100); earlier packets decode as milli-°C (÷1000).
+# 2026-05-01 17:00 PDT == 2026-05-02 00:00 UTC.
+V6_6_DEPLOY_DATE = datetime(2026, 5, 2, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _sst_scale_for_timestamp(ts) -> int:
+    """Pick SST scale factor (100 for V6.6+, 1000 for V6.5 and earlier).
+
+    Accepts a datetime, pandas Timestamp, ISO-8601 string, or None. Naive
+    timestamps are assumed UTC. When ts is None/empty/unparseable, defaults
+    to 100 (V6.6) so new data is decoded correctly.
+    """
+    if ts is None or ts == "":
+        return 100
+    try:
+        if isinstance(ts, str):
+            s = ts.strip().replace("Z", "+00:00")
+            try:
+                ts = datetime.fromisoformat(s)
+            except ValueError:
+                import pandas as _pd  # lazy: avoid hard dep at import time
+                ts = _pd.Timestamp(s).to_pydatetime()
+        if hasattr(ts, "to_pydatetime"):
+            ts = ts.to_pydatetime()
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return 100 if ts >= V6_6_DEPLOY_DATE else 1000
+    except Exception:
+        return 100
 
 
 def calculate_crc8(data: bytes) -> int:
@@ -419,14 +460,19 @@ def decode_fy26_ec(data: bytes) -> dict:
     }
 
 
-def decode_v64(data: bytes) -> dict:
-    """Decode V6.4 45-byte packet.
+def decode_v64(data: bytes, sst_scale: int = 100) -> dict:
+    """Decode V6.4/V6.5/V6.6 45-byte packet.
 
     V6.4 changes from FY26 (43B):
     - TENG Current Avg is best 1-min sliding window average, scale ÷100
     - Prev TENG Avg/Max now scale ÷100
     - Added Prev Oper Time (2 bytes) at offset 22
     - All subsequent fields shifted +2 bytes
+
+    Byte layout is identical for V6.4, V6.5, V6.6. ``sst_scale`` selects the
+    SST encoding: 100 for V6.6 (centi-°C, default), 1000 for V6.5 and earlier
+    (milli-°C). Callers should pick this from the packet timestamp via
+    ``_sst_scale_for_timestamp`` or from an explicit firmware version.
     """
     fields = []
 
@@ -503,25 +549,30 @@ def decode_v64(data: bytes) -> dict:
     raw = _uint16(data, 40)
     fields.append(_field("Humidity", _hex_slice(data, 40, 2), raw, round(raw / 10, 1), "%RH"))
 
-    # SST (42-43) — signed
+    # SST (42-43) — signed; scale depends on firmware (V6.6 ÷100, ≤V6.5 ÷1000)
     raw = _int16(data, 42)
-    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / 1000, 3), "°C"))
+    sst_decimals = 3 if sst_scale == 1000 else 2
+    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / sst_scale, sst_decimals), "°C"))
 
     # CRC (44)
     crc_byte = data[44]
     crc_calc = calculate_crc8(data[:44])
     crc_ok = crc_byte == crc_calc
 
+    version = "FY26(v6.6)" if sst_scale == 100 else "FY26(v6.5)"
     return {
-        "version": "FY26(v6.4)",
+        "version": version,
         "byte_len": 45,
         "crc_ok": crc_ok,
         "fields": fields,
     }
 
 
-def decode_v64_ec(data: bytes) -> dict:
-    """Decode V6.4+EC 49-byte packet (V6.4 + SSS/conductivity)."""
+def decode_v64_ec(data: bytes, sst_scale: int = 100) -> dict:
+    """Decode V6.4/V6.5/V6.6 + EC 49-byte packet (45B layout + SSS/conductivity).
+
+    See ``decode_v64`` for the meaning of ``sst_scale``.
+    """
     fields = []
 
     # TENG Current Avg (0-1) — best 1-min window, scale 100
@@ -597,9 +648,10 @@ def decode_v64_ec(data: bytes) -> dict:
     raw = _uint16(data, 40)
     fields.append(_field("Humidity", _hex_slice(data, 40, 2), raw, round(raw / 10, 1), "%RH"))
 
-    # SST (42-43) — signed
+    # SST (42-43) — signed; scale depends on firmware (V6.6 ÷100, ≤V6.5 ÷1000)
     raw = _int16(data, 42)
-    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / 1000, 3), "°C"))
+    sst_decimals = 3 if sst_scale == 1000 else 2
+    fields.append(_field("SST", _hex_slice(data, 42, 2), raw, round(raw / sst_scale, sst_decimals), "°C"))
 
     # SSS / Salinity (44-45)
     raw = _uint16(data, 44)
@@ -614,21 +666,33 @@ def decode_v64_ec(data: bytes) -> dict:
     crc_calc = calculate_crc8(data[:48])
     crc_ok = crc_byte == crc_calc
 
+    version = "FY26(v6.6)+EC" if sst_scale == 100 else "FY26(v6.5)+EC"
     return {
-        "version": "FY26(v6.4)+EC",
+        "version": version,
         "byte_len": 49,
         "crc_ok": crc_ok,
         "fields": fields,
     }
 
 
-def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None) -> dict:
+def auto_detect_and_decode(
+    hex_string: str,
+    force_version: Optional[str] = None,
+    packet_timestamp=None,
+) -> dict:
     """
     Decode a hex-encoded telemetry packet.
 
     Args:
         hex_string: Hex-encoded packet data (whitespace/0x prefix stripped automatically).
         force_version: If set, force a specific decoder version instead of auto-detecting.
+            Supported V6.x names: ``FY26(v6.6)``, ``FY26(v6.6)+EC``,
+            ``FY26(v6.5)``, ``FY26(v6.5)+EC``. Legacy names ``FY26(v6.4)``
+            and ``FY26(v6.4)+EC`` are accepted as aliases for V6.5
+            (milli-°C SST encoding).
+        packet_timestamp: Optional packet receive time used to pick the SST
+            scale for V6.5/V6.6 packets when ``force_version`` doesn't fix
+            the firmware. See ``_sst_scale_for_timestamp``.
 
     Returns:
         Dict with version, byte_len, crc_ok, and fields list.
@@ -645,14 +709,37 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
 
     byte_len = len(data)
 
+    # Map firmware version → SST scale for the 45B/49B layout. V6.4/V6.5 used
+    # milli-°C; V6.6 switched to centi-°C with the same byte layout.
+    _v64_scale_map = {
+        "FY26(v6.6)": 100,
+        "FY26(v6.6)+EC": 100,
+        "FY26(v6.5)": 1000,
+        "FY26(v6.5)+EC": 1000,
+        "FY26(v6.4)": 1000,        # legacy alias
+        "FY26(v6.4)+EC": 1000,     # legacy alias
+    }
+
+    def _v64(d: bytes) -> dict:
+        scale = _v64_scale_map.get(force_version) if force_version else _sst_scale_for_timestamp(packet_timestamp)
+        return decode_v64(d, sst_scale=scale)
+
+    def _v64_ec(d: bytes) -> dict:
+        scale = _v64_scale_map.get(force_version) if force_version else _sst_scale_for_timestamp(packet_timestamp)
+        return decode_v64_ec(d, sst_scale=scale)
+
     if force_version:
         version_map = {
             "FY25": (38, decode_fy25),
             "FY26(v3)": (37, decode_fy26_v3),
             "FY26(v5)": (43, decode_fy26),
             "FY26(v5)+EC": (47, decode_fy26_ec),
-            "FY26(v6.4)": (45, decode_v64),
-            "FY26(v6.4)+EC": (49, decode_v64_ec),
+            "FY26(v6.4)": (45, _v64),
+            "FY26(v6.4)+EC": (49, _v64_ec),
+            "FY26(v6.5)": (45, _v64),
+            "FY26(v6.5)+EC": (49, _v64_ec),
+            "FY26(v6.6)": (45, _v64),
+            "FY26(v6.6)+EC": (49, _v64_ec),
         }
         if force_version not in version_map:
             return {"error": f"Unknown version: {force_version}", "version": None, "byte_len": byte_len, "crc_ok": False, "fields": []}
@@ -675,19 +762,20 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
     elif byte_len == 43:
         return decode_fy26(data)
     elif byte_len == 45:
-        return decode_v64(data)
+        return _v64(data)
     elif byte_len == 47:
         return decode_fy26_ec(data)
     elif byte_len == 49:
-        return decode_v64_ec(data)
+        return _v64_ec(data)
     else:
         # Best-effort: try closest known decoder for unknown lengths
         if byte_len > 49:
             try:
-                result = decode_v64_ec(data[:49])
-                result["version"] = f"FY26(v6.4)+EC?({byte_len}B)"
+                result = _v64_ec(data[:49])
+                base_ver = result["version"]
+                result["version"] = f"{base_ver}?({byte_len}B)"
                 result["byte_len"] = byte_len
-                result["warning"] = f"Decoded as FY26(v6.4)+EC (49B), ignoring {byte_len - 49} trailing byte(s)"
+                result["warning"] = f"Decoded as {base_ver} (49B), ignoring {byte_len - 49} trailing byte(s)"
                 return result
             except Exception:
                 pass
@@ -702,8 +790,10 @@ def auto_detect_and_decode(hex_string: str, force_version: Optional[str] = None)
 
 # Sample data for testing
 SAMPLE_DATA = {
-    "FY26(v6.4) 45B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d48c",
-    "FY26(v6.4)+EC 49B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d486c414b452",
+    "FY26(v6.6) 45B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c204e2f9",
+    "FY26(v6.6)+EC 49B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c204e286c414b47b",
+    "FY26(v6.5) 45B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d48c",
+    "FY26(v6.5)+EC 49B": "000500c8000000640000000000000000000010680000018110681c5f2f00b71a8040009939a309c401c230d486c414b452",
     "FY26(v3)": "0002037300000272000200040f5800000f580000000000000000027239a9047c017a0a1441",
     "FY25": "000200000000000000000000000000" + "0f58" + "00000000" + "00000000" + "0000" + "39a9" + "047c" + "017a" + "0a14" + "0000" + "00",
 }

@@ -25,10 +25,31 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-VERSIONS = ["Auto-detect", "FY26(v6.4)+EC", "FY26(v6.4)", "FY26(v5)+EC", "FY26(v5)", "FY26(v3)", "FY25"]
+VERSIONS = [
+    "Auto-detect",
+    "FY26(v6.6)+EC",
+    "FY26(v6.6)",
+    "FY26(v6.5)+EC",
+    "FY26(v6.5)",
+    "FY26(v5)+EC",
+    "FY26(v5)",
+    "FY26(v3)",
+    "FY25",
+]
 
-# Version selector
-version = st.selectbox("Decoder Version", VERSIONS)
+# Version selector. V6.5 vs V6.6 share the same byte layout (45B/49B) and
+# differ only in SST encoding: V6.5 uses int16 milli-°C (÷1000, ±32.767 °C
+# range — overflows in direct sun), V6.6 uses int16 centi-°C (÷100, ±327.67 °C).
+# Auto-detect picks the SST scale from the cutoff date 2026-05-01 17:00 PDT.
+version = st.selectbox(
+    "Decoder Version",
+    VERSIONS,
+    help=(
+        "V6.5 = milli-°C SST (before 2026-05-01 17:00 PDT). "
+        "V6.6 = centi-°C SST (2026-05-01 17:00 PDT onward). "
+        "Same 45B/49B byte layout for both."
+    ),
+)
 force_version = None if version == "Auto-detect" else version
 
 # Mode tabs
